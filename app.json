@@ -36,6 +36,15 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "a44f6b3c-eb55-4cc3-b95e-1d0c2627d5de"
+      }
+    },
+    "owner": "ragessler"
   }
 }
