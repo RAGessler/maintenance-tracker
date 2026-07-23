@@ -19,7 +19,8 @@ locations described below.
 
 ## Sources of truth
 
-- GitHub Project: priority, milestone, and workflow status.
+- [GitHub Project](https://github.com/users/RAGessler/projects/8): priority, milestone, and
+  workflow status.
 - GitHub issue: feature or spike scope, acceptance criteria, dependencies, and progress.
 - Pull request: proposed implementation and its verification evidence.
 - `docs/architecture.md`: a concise description of the system that exists now and approved

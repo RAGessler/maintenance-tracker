@@ -7,7 +7,7 @@ Clean Expo development-build baseline for isolated vehicle trip-trigger spikes.
 GitHub is the project system of record:
 
 - [MVP parent and feature hierarchy](https://github.com/RAGessler/maintenance-tracker/issues/5)
-- [GitHub Projects](https://github.com/RAGessler/maintenance-tracker/projects)
+- [Maintenance Tracker — MVP Project](https://github.com/users/RAGessler/projects/8)
 - [Current architecture and approved boundaries](docs/architecture.md)
 - [Architecture decision records](docs/adr/)
 
