@@ -2,6 +2,22 @@
 
 Clean Expo development-build baseline for isolated vehicle trip-trigger spikes.
 
+## Planning and project truth
+
+GitHub is the project system of record:
+
+- [MVP parent and feature hierarchy](https://github.com/RAGessler/maintenance-tracker/issues/5)
+- [Maintenance Tracker — MVP Project](https://github.com/users/RAGessler/projects/8)
+- [Current architecture and approved boundaries](docs/architecture.md)
+- [Architecture decision records](docs/adr/)
+
+Workflow status and priority belong in the GitHub Project. Feature scope, acceptance criteria,
+dependencies, and spike findings belong in GitHub issues. Only durable architectural decisions and
+current implementation documentation belong in this repository.
+
+All coding agents must start with [AGENTS.md](AGENTS.md). Agent-specific scratch plans are not a
+source of project truth.
+
 ## Baseline
 
 - Expo SDK 57
@@ -55,8 +71,11 @@ Keep the repository root as the application under test. Do not nest additional E
 
 1. Branch from the clean baseline.
 2. Implement one platform spike on that branch.
-3. Record evidence, limitations, and disposition in its GitHub issue.
+3. Record evidence, limitations, and an **adopt**, **adapt**, or **reject** disposition in its
+   GitHub issue.
 4. Merge reusable platform-neutral infrastructure only after the spike proves it is useful.
+
+The full spike closeout requirements are defined in [AGENTS.md](AGENTS.md#spike-completion).
 
 Active work:
 

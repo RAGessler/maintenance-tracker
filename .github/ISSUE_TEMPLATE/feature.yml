@@ -1,0 +1,48 @@
+name: MVP feature
+description: Define a user-visible capability with testable acceptance criteria.
+title: ""
+labels: ["type:feature"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User outcome
+      description: Who needs this and what should they be able to accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Describe included behavior and important boundaries.
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: List tempting adjacent work that this issue must not absorb.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use observable, testable statements.
+    validations:
+      required: true
+  - type: textarea
+    id: states
+    attributes:
+      label: UX states and design
+      description: Link accepted visual design and specify loading, empty, offline, error, permission, accessibility, and destructive states.
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Link blockers, downstream issues, spikes, and ADRs.
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification notes
+      description: Identify automated checks, physical-device evidence, migrations, privacy, or security testing required.
+    validations:
+      required: true
