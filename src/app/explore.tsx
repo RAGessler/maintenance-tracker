@@ -1,180 +1,154 @@
-import { Image } from 'expo-image';
-import { SymbolView } from 'expo-symbols';
-import { Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ExternalLink } from '@/components/external-link';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Collapsible } from '@/components/ui/collapsible';
-import { WebBadge } from '@/components/web-badge';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useTripDiagnostics } from '@/hooks/use-trip-diagnostics';
 import { useTheme } from '@/hooks/use-theme';
+import { exportEvidence } from '@/utils/export-evidence';
 
-export default function TabTwoScreen() {
-  const safeAreaInsets = useSafeAreaInsets();
-  const insets = {
-    ...safeAreaInsets,
-    bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
-  };
+export default function DiagnosticsScreen() {
   const theme = useTheme();
+  const { deleteAllData, events, isSupported, refresh, status, tripSummaries } = useTripDiagnostics();
 
-  const contentPlatformStyle = Platform.select({
-    android: {
-      paddingTop: insets.top,
-      paddingLeft: insets.left,
-      paddingRight: insets.right,
-      paddingBottom: insets.bottom,
-    },
-    web: {
-      paddingTop: Spacing.six,
-      paddingBottom: Spacing.four,
-    },
-  });
+  function confirmExport() {
+    Alert.alert(
+      'Export sensitive diagnostics?',
+      'The JSON may include vehicle route names, trip identifiers, and location timing.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Export', onPress: () => void exportEvidence() },
+      ],
+    );
+  }
+
+  function confirmDelete() {
+    Alert.alert('Delete all spike data?', 'This permanently removes trips, samples, and diagnostics.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: deleteAllData },
+    ]);
+  }
 
   return (
-    <ScrollView
-      style={[styles.scrollView, { backgroundColor: theme.background }]}
-      contentInset={insets}
-      contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}>
-      <ThemedView style={styles.container}>
-        <ThemedView style={styles.titleContainer}>
-          <ThemedText type="subtitle">Explore</ThemedText>
-          <ThemedText style={styles.centerText} themeColor="textSecondary">
-            This starter app includes example{'\n'}code to help you get started.
-          </ThemedText>
-
-          <ExternalLink href="https://docs.expo.dev" asChild>
-            <Pressable style={({ pressed }) => pressed && styles.pressed}>
-              <ThemedView type="backgroundElement" style={styles.linkButton}>
-                <ThemedText type="link">Expo documentation</ThemedText>
-                <SymbolView
-                  tintColor={theme.text}
-                  name={{ ios: 'arrow.up.right.square', android: 'link', web: 'link' }}
-                  size={12}
-                />
-              </ThemedView>
-            </Pressable>
-          </ExternalLink>
-        </ThemedView>
-
-        <ThemedView style={styles.sectionsWrapper}>
-          <Collapsible title="File-based routing">
-            <ThemedText type="small">
-              This app has two screens: <ThemedText type="code">src/app/index.tsx</ThemedText> and{' '}
-              <ThemedText type="code">src/app/explore.tsx</ThemedText>
+    <ScrollView style={{ backgroundColor: theme.background }} contentContainerStyle={styles.scroll}>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.heading}>
+          <View style={styles.headingText}>
+            <ThemedText type="subtitle">Diagnostics</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Persistent native events, newest first
             </ThemedText>
-            <ThemedText type="small">
-              The layout file in <ThemedText type="code">src/app/_layout.tsx</ThemedText> sets up
-              the tab navigator.
-            </ThemedText>
-            <ExternalLink href="https://docs.expo.dev/router/introduction">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
-
-          <Collapsible title="Android, iOS, and web support">
-            <ThemedView type="backgroundElement" style={styles.collapsibleContent}>
-              <ThemedText type="small">
-                You can open this project on Android, iOS, and the web. To open the web version,
-                press <ThemedText type="smallBold">w</ThemedText> in the terminal running this
-                project.
+          </View>
+          <View style={styles.headingActions}>
+            <Pressable accessibilityRole="button" onPress={refresh} style={styles.refreshButton}>
+              <ThemedText type="smallBold" style={styles.refreshText}>
+                Refresh
               </ThemedText>
-              <Image
-                source={require('@/assets/images/tutorial-web.png')}
-                style={styles.imageTutorial}
-              />
-            </ThemedView>
-          </Collapsible>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={!isSupported}
+              onPress={confirmExport}
+              style={styles.exportButton}>
+              <ThemedText type="smallBold">Export</ThemedText>
+            </Pressable>
+          </View>
+        </View>
 
-          <Collapsible title="Images">
-            <ThemedText type="small">
-              For static images, you can use the <ThemedText type="code">@2x</ThemedText> and{' '}
-              <ThemedText type="code">@3x</ThemedText> suffixes to provide files for different
-              screen densities.
+        <ThemedView type="backgroundElement" style={styles.routeCard}>
+          <ThemedText type="smallBold">Current audio outputs</ThemedText>
+          {status?.currentRoute.length ? (
+            status.currentRoute.map((port) => (
+              <View key={port.uid}>
+                <ThemedText type="small">{port.name}</ThemedText>
+                <ThemedText type="code" themeColor="textSecondary">
+                  {port.type}
+                </ThemedText>
+              </View>
+            ))
+          ) : (
+            <ThemedText type="small" themeColor="textSecondary">
+              No native route data
             </ThemedText>
-            <Image source={require('@/assets/images/react-logo.png')} style={styles.imageReact} />
-            <ExternalLink href="https://reactnative.dev/docs/images">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
-
-          <Collapsible title="Light and dark mode components">
-            <ThemedText type="small">
-              This template has light and dark mode support. The{' '}
-              <ThemedText type="code">useColorScheme()</ThemedText> hook lets you inspect what the
-              user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-            </ThemedText>
-            <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
-
-          <Collapsible title="Animations">
-            <ThemedText type="small">
-              This template includes an example of an animated component. The{' '}
-              <ThemedText type="code">src/components/ui/collapsible.tsx</ThemedText> component uses
-              the powerful <ThemedText type="code">react-native-reanimated</ThemedText> library to
-              animate opening this hint.
-            </ThemedText>
-          </Collapsible>
+          )}
         </ThemedView>
-        {Platform.OS === 'web' && <WebBadge />}
-      </ThemedView>
+
+        <ThemedView type="backgroundElement" style={styles.routeCard}>
+          <ThemedText type="smallBold">Trip summaries</ThemedText>
+          {tripSummaries.length ? (
+            tripSummaries.map((trip) => (
+              <View key={trip.id} style={styles.trip}>
+                <ThemedText type="smallBold">{trip.vehicleName ?? 'Unknown vehicle'}</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {(trip.distanceMeters / 1_609.344).toFixed(2)} mi · {trip.acceptedSamples} accepted fixes
+                </ThemedText>
+                <ThemedText type="code" themeColor="textSecondary">{trip.startedAt}</ThemedText>
+              </View>
+            ))
+          ) : (
+            <ThemedText type="small" themeColor="textSecondary">No recorded trips</ThemedText>
+          )}
+        </ThemedView>
+
+        <Pressable
+          accessibilityRole="button"
+          disabled={!isSupported}
+          onPress={confirmDelete}
+          style={styles.deleteButton}>
+          <ThemedText type="smallBold" style={styles.deleteText}>
+            Delete all spike data
+          </ThemedText>
+        </Pressable>
+
+        <View style={styles.events}>
+          {events.map((event) => (
+            <ThemedView key={event.eventId} type="backgroundElement" style={styles.event}>
+              <View style={styles.eventHeader}>
+                <ThemedText type="smallBold">{event.name}</ThemedText>
+                <ThemedText type="code" themeColor="textSecondary">
+                  {event.source}
+                </ThemedText>
+              </View>
+              <ThemedText type="code" themeColor="textSecondary">
+                {event.timestamp}
+              </ThemedText>
+              <ThemedText type="code" numberOfLines={4}>
+                {event.payload}
+              </ThemedText>
+            </ThemedView>
+          ))}
+        </View>
+      </SafeAreaView>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollView: {
-    flex: 1,
-  },
-  contentContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
+  scroll: { flexGrow: 1, alignItems: 'center' },
   container: {
-    maxWidth: MaxContentWidth,
-    flexGrow: 1,
-  },
-  titleContainer: {
-    gap: Spacing.three,
-    alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.six,
-  },
-  centerText: {
-    textAlign: 'center',
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  linkButton: {
-    flexDirection: 'row',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.five,
-    justifyContent: 'center',
-    gap: Spacing.one,
-    alignItems: 'center',
-  },
-  sectionsWrapper: {
-    gap: Spacing.five,
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.three,
-  },
-  collapsibleContent: {
-    alignItems: 'center',
-  },
-  imageTutorial: {
     width: '100%',
-    aspectRatio: 296 / 171,
-    borderRadius: Spacing.three,
-    marginTop: Spacing.two,
+    maxWidth: MaxContentWidth,
+    padding: Spacing.four,
+    paddingBottom: BottomTabInset + Spacing.five,
+    gap: Spacing.three,
   },
-  imageReact: {
-    width: 100,
-    height: 100,
-    alignSelf: 'center',
+  heading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.four,
+    gap: Spacing.three,
   },
+  headingText: { flex: 1, gap: Spacing.one },
+  headingActions: { gap: Spacing.two },
+  refreshButton: { backgroundColor: '#176B4D', borderRadius: 12, padding: 12 },
+  refreshText: { color: '#FFFFFF' },
+  exportButton: { borderWidth: 1, borderColor: '#8B8D98', borderRadius: 12, padding: 12 },
+  deleteButton: { alignSelf: 'flex-start', paddingVertical: Spacing.two },
+  deleteText: { color: '#C43D3D' },
+  routeCard: { padding: Spacing.four, borderRadius: 20, gap: Spacing.two },
+  trip: { gap: Spacing.one, paddingVertical: Spacing.one },
+  events: { gap: Spacing.two },
+  event: { borderRadius: 14, padding: Spacing.three, gap: Spacing.one },
+  eventHeader: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.two },
 });

@@ -1,6 +1,6 @@
 # Maintenance Tracker
 
-Clean Expo development-build baseline for isolated vehicle trip-trigger spikes.
+Expo development-build spike for iOS CarPlay and Bluetooth-stereo trip triggers.
 
 ## Baseline
 
@@ -62,6 +62,56 @@ Active work:
 
 - [iOS car-stereo trip triggers](https://github.com/RAGessler/maintenance-tracker/issues/2)
 - [Android car-stereo Bluetooth trip triggers](https://github.com/RAGessler/maintenance-tracker/issues/3)
+
+## iOS car-stereo spike
+
+This branch exposes two App Shortcuts:
+
+- **Start Trip**, with a CarPlay or Bluetooth stereo trigger parameter
+- **End Trip**
+
+The actions call a native Swift coordinator without opening the React Native UI. The coordinator
+records App Intent, Core Location, state transition, and `AVAudioSession` route-change evidence in
+`Library/LocalDatabase/car-stereo-spike.db`. The app's Diagnostics tab displays and exports the
+latest events.
+
+### Physical iPhone setup
+
+1. Connect the iPhone and run `npm run ios -- --device`, or open
+   `ios/MaintenanceTracker.xcworkspace` and select the signed app target in Xcode. Do not open the
+   `.xcodeproj` directly because it omits CocoaPods dependency targets.
+2. Open the app and tap **Enable location**. The spike requires Always Location before an intent can
+   start candidate tracking.
+3. Connect the stereo and tap **Set current car route** so Bluetooth starts cannot bind to another
+   accessory such as AirPods.
+4. In Shortcuts, create a CarPlay **Connects** personal automation that runs **Start Trip** with the
+   CarPlay parameter.
+5. Create a CarPlay **Disconnects** automation that runs **End Trip**.
+6. Create Bluetooth **Connects** and **Disconnects** automations for the selected stereo. Run
+   **Start Trip** with the Bluetooth stereo parameter on connect and **End Trip** on disconnect.
+7. Configure each automation to run immediately without asking.
+
+On the physical test iPhone, Shortcuts exposes selected-device Bluetooth connect and disconnect
+triggers. The captured audio-route loss and three-minute reconnect grace remain a native fallback
+when the disconnect automation is delayed or missed; route changes are not a system-wide Bluetooth
+connection API.
+
+### Native development
+
+The generated `ios/` directory remains disposable. Rebuild after changing Swift, the config plugin,
+or native configuration:
+
+```bash
+npx expo prebuild --platform ios --clean
+npm run ios -- --device
+```
+
+Xcode 26.3 currently needs the tracked `patch-package` fix for an ambiguous `abs` call in
+`expo-modules-jsi@57.0.4`. It is applied automatically by `npm install` and should be removed once an
+Expo SDK 57 patch release includes the fix.
+
+See `ARCHITECTURE.md` for a production implementation handoff, `TEST_PLAN.md` for the physical test
+matrix, and `RESULTS.md` for proven and pending findings.
 
 ## Useful commands
 
