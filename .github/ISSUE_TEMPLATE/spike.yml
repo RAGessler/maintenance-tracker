@@ -1,0 +1,52 @@
+name: Platform or technical spike
+description: Time-box an investigation and finish with evidence and a disposition.
+title: "Spike: "
+labels: ["type:spike"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A spike answers a decision-changing question. It does not silently become production code.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: State the specific uncertainty this spike must resolve.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Product and technical constraints
+      description: Include platform versions, hardware requirements, policies, and unacceptable alternatives.
+    validations:
+      required: true
+  - type: textarea
+    id: matrix
+    attributes:
+      label: Test matrix
+      description: List devices, OS versions, foreground/background/locked states, lifecycle cases, and negative controls.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Define the evidence required to choose adopt, adapt, or reject.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and related decisions
+      description: Link blocking issues, blocked issues, documentation, and relevant ADRs.
+  - type: checkboxes
+    id: closeout
+    attributes:
+      label: Closeout checklist
+      options:
+        - label: Final comment documents environments and devices tested.
+        - label: Final comment explains what worked and failed with evidence.
+        - label: Platform, policy, and lifecycle limitations are explicit.
+        - label: Disposition is adopt, adapt, or reject.
+        - label: Follow-up issues or ADRs are linked.
