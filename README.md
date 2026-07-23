@@ -1,50 +1,79 @@
-# Welcome to your Expo app 👋
+# Maintenance Tracker
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Clean Expo development-build baseline for isolated vehicle trip-trigger spikes.
 
-## Get started
+## Baseline
 
-1. Install dependencies
+- Expo SDK 57
+- React Native 0.86
+- TypeScript with strict checking
+- Expo Router
+- Continuous Native Generation
+- `expo-dev-client` for custom native modules and configuration
 
-   ```bash
-   npm install
-   ```
+The generated `ios/` and `android/` directories are intentionally ignored. Each spike should express
+native configuration through Expo config plugins where practical and regenerate native projects when
+the native dependency graph changes.
 
-2. Start the app
+## Setup
 
-   ```bash
-    npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Expo SDK 57 requires Node.js 22.13 or newer.
 
 ```bash
-npm run reset-project
+npm install
+npm run typecheck
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Start the Metro server for an installed development build:
 
-## Learn more
+```bash
+npm start
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Create or refresh a local development build:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+npm run ios
+npm run android
+```
 
-## Join the community
+The first native run generates the platform project and compiles the development client. Rebuild
+after adding a native dependency, changing a config plugin, or changing native app configuration.
 
-Join our community of developers creating universal apps.
+For UI-only work that does not depend on custom native code, Expo Go remains available:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+npm run start:go
+```
+
+Expo Go is not a valid test environment for the Bluetooth, App Intents, broadcast receiver,
+background execution, or background location behavior covered by the active spikes.
+
+## Spike workflow
+
+Keep the repository root as the application under test. Do not nest additional Expo projects.
+
+1. Branch from the clean baseline.
+2. Implement one platform spike on that branch.
+3. Record evidence, limitations, and disposition in its GitHub issue.
+4. Merge reusable platform-neutral infrastructure only after the spike proves it is useful.
+
+Active work:
+
+- [iOS car-stereo trip triggers](https://github.com/RAGessler/maintenance-tracker/issues/2)
+- [Android car-stereo Bluetooth trip triggers](https://github.com/RAGessler/maintenance-tracker/issues/3)
+
+## Useful commands
+
+```bash
+npm start
+npm run start:go
+npm run ios
+npm run android
+npm run web
+npm run typecheck
+npm run lint
+```
+
+Use the exact [Expo SDK 57 documentation](https://docs.expo.dev/versions/v57.0.0/) when adding
+Expo APIs or native configuration.
