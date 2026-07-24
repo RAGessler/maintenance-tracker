@@ -29,9 +29,8 @@ struct VehicleEntity: AppEntity {
 @available(iOS 16.0, *)
 struct VehicleEntityQuery: EntityQuery {
   func entities(for identifiers: [String]) async throws -> [VehicleEntity] {
-    let vehicles = await MainActor.run { TripCoordinator.shared.availableVehicles() }
     return identifiers.map { identifier in
-      guard let vehicle = vehicles.first(where: { $0.id == identifier }) else {
+      guard let vehicle = VehicleChoice.all.first(where: { $0.id == identifier }) else {
         return VehicleEntity(id: identifier, name: "Unavailable vehicle")
       }
       return VehicleEntity(id: vehicle.id, name: vehicle.name)
@@ -39,9 +38,7 @@ struct VehicleEntityQuery: EntityQuery {
   }
 
   func suggestedEntities() async throws -> [VehicleEntity] {
-    await MainActor.run {
-      TripCoordinator.shared.availableVehicles().map { VehicleEntity(id: $0.id, name: $0.name) }
-    }
+    VehicleChoice.all.map { VehicleEntity(id: $0.id, name: $0.name) }
   }
 }
 
@@ -56,6 +53,10 @@ struct StartTripIntent: AppIntent {
 
   @Parameter(title: "Vehicle")
   var vehicle: VehicleEntity
+
+  static var parameterSummary: some ParameterSummary {
+    Summary("Start trip for \(\.$vehicle) using \(\.$trigger)")
+  }
 
   @MainActor
   func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -88,6 +89,10 @@ struct EndTripIntent: AppIntent {
   @Parameter(title: "Trigger", default: .carplay)
   var trigger: TripTriggerSource
 
+  static var parameterSummary: some ParameterSummary {
+    Summary("End trip for \(\.$vehicle) using \(\.$trigger)")
+  }
+
   @MainActor
   func perform() async throws -> some IntentResult & ProvidesDialog {
     switch TripCoordinator.shared.endTrip(source: trigger.rawValue, vehicleId: vehicle.id) {
@@ -95,9 +100,33 @@ struct EndTripIntent: AppIntent {
       return .result(dialog: "Trip ended for \(vehicle.name)")
     case "vehicle-mismatch":
       return .result(dialog: "A different vehicle is being tracked. No trip was ended.")
+    case "carplay-active":
+      return .result(dialog: "CarPlay is still active. Trip completion was deferred.")
     default:
       return .result(dialog: "There is no active trip to end")
     }
+  }
+}
+
+@available(iOS 16.0, *)
+struct ConfigureVehicleRouteIntent: AppIntent {
+  static let title: LocalizedStringResource = "Configure Vehicle Route"
+  static let description = IntentDescription("Binds the currently connected car audio route to a vehicle.")
+  static let openAppWhenRun = false
+
+  @Parameter(title: "Vehicle")
+  var vehicle: VehicleEntity
+
+  static var parameterSummary: some ParameterSummary {
+    Summary("Configure current route for \(\.$vehicle)")
+  }
+
+  @MainActor
+  func perform() async throws -> some IntentResult & ProvidesDialog {
+    if TripCoordinator.shared.configureCurrentRoute(vehicleId: vehicle.id) {
+      return .result(dialog: "Current route configured for \(vehicle.name)")
+    }
+    return .result(dialog: "Connect the vehicle audio route and try again")
   }
 }
 
@@ -106,15 +135,21 @@ struct TripAppShortcuts: AppShortcutsProvider {
   static var appShortcuts: [AppShortcut] {
     AppShortcut(
       intent: StartTripIntent(),
-      phrases: ["Start a trip with \(.applicationName)"],
+      phrases: ["Start \(\.$vehicle) trip with \(.applicationName)"],
       shortTitle: "Start Trip",
       systemImageName: "car.fill"
     )
     AppShortcut(
       intent: EndTripIntent(),
-      phrases: ["End my trip with \(.applicationName)"],
+      phrases: ["End \(\.$vehicle) trip with \(.applicationName)"],
       shortTitle: "End Trip",
       systemImageName: "stop.circle.fill"
+    )
+    AppShortcut(
+      intent: ConfigureVehicleRouteIntent(),
+      phrases: ["Configure \(\.$vehicle) route with \(.applicationName)"],
+      shortTitle: "Configure Vehicle",
+      systemImageName: "car.badge.gearshape"
     )
   }
 }

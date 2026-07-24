@@ -5,6 +5,10 @@ import Foundation
 public struct VehicleChoice: Sendable {
   public let id: String
   public let name: String
+
+  public static let all = VehicleFingerprint.all.map {
+    VehicleChoice(id: $0.id, name: $0.name)
+  }
 }
 
 @MainActor
@@ -115,17 +119,43 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
       ], eventId: eventId)
       return "vehicle-mismatch"
     }
+    if source == "bluetooth" && AVAudioSession.sharedInstance().currentRoute.outputs.contains(where: { $0.portType == .carAudio }) {
+      emit(source: source, name: "end-deferred-carplay-active", payload: [
+        "state": state,
+        "vehicleId": vehicleId ?? "none"
+      ], eventId: eventId)
+      return "carplay-active"
+    }
     locationManager.stopUpdatingLocation()
     clearDeadlines()
     transition(to: "completed", source: source, eventId: eventId)
     return "ended"
   }
 
-  public func configureCurrentRoute() -> Bool {
+  public func configureCurrentRoute(vehicleId: String? = nil) -> Bool {
     let carPortTypes: Set<AVAudioSession.Port> = [.carAudio, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE]
     guard let port = AVAudioSession.sharedInstance().currentRoute.outputs.first(where: { carPortTypes.contains($0.portType) }) else {
       emit(source: "user", name: "car-route-configuration-failed", payload: ["reason": "no-car-route"])
       return false
+    }
+    if let vehicleId {
+      guard let vehicle = VehicleFingerprint.identified(by: vehicleId) else {
+        emit(source: "user", name: "car-route-configuration-failed", payload: ["reason": "vehicle-unavailable"])
+        return false
+      }
+      let identity = routeIdentity(port)
+      for otherVehicle in VehicleFingerprint.all where otherVehicle.id != vehicle.id {
+        if eventStore.runtime(key: "vehicle_route_uid_\(otherVehicle.id)") == identity {
+          eventStore.setRuntime(key: "vehicle_route_uid_\(otherVehicle.id)", value: nil)
+          eventStore.setRuntime(key: "vehicle_route_type_\(otherVehicle.id)", value: nil)
+        }
+      }
+      eventStore.setRuntime(key: "vehicle_route_uid_\(vehicle.id)", value: identity)
+      eventStore.setRuntime(key: "vehicle_route_type_\(vehicle.id)", value: port.portType.rawValue)
+      emit(source: "user", name: "vehicle-route-configured", payload: [
+        "type": port.portType.rawValue,
+        "vehicleId": vehicle.id
+      ])
     }
     eventStore.setRuntime(key: "configured_route_uid", value: port.uid)
     eventStore.setRuntime(key: "configured_route_name", value: port.portName)
@@ -135,7 +165,7 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
   }
 
   public func availableVehicles() -> [VehicleChoice] {
-    VehicleFingerprint.all.map { VehicleChoice(id: $0.id, name: $0.name) }
+    VehicleChoice.all
   }
 
   public func deleteAllData() {
@@ -260,7 +290,7 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
     let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
     let selectedVehicle = VehicleFingerprint.named(selectedVehicleName)
     let routeIsPresent = selectedVehicle.map { fingerprint in
-      outputs.contains { VehicleFingerprint.matching($0)?.id == fingerprint.id }
+      outputs.contains { matchingVehicle($0)?.id == fingerprint.id }
     } ?? outputs.contains { $0.uid == selectedRouteUID }
     if routeIsPresent {
       if state == "reconnect-grace-period" {
@@ -286,15 +316,15 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
     if source == "carplay" {
       port = outputs.first { $0.portType == .carAudio }
     } else if source == "bluetooth" {
-      port = outputs.first { VehicleFingerprint.matching($0)?.isCarPlay == false }
+      port = outputs.first { matchingVehicle($0)?.isCarPlay == false }
         ?? outputs.first { $0.uid == configuredUID }
-        ?? outputs.first { VehicleFingerprint.matching($0)?.isCarPlay == true }
+        ?? outputs.first { matchingVehicle($0)?.isCarPlay == true }
     } else {
       port = outputs.first { $0.uid == configuredUID } ?? outputs.first { $0.portType == .carAudio }
     }
     selectedRouteName = port?.portName
     selectedRouteUID = port?.uid
-    let matchedVehicle = port.flatMap(VehicleFingerprint.matching)
+    let matchedVehicle = port.flatMap(matchingVehicle)
     selectedVehicleId = matchedVehicle?.id
     selectedVehicleName = matchedVehicle?.name
     eventStore.setRuntime(key: "selected_route_name", value: selectedRouteName)
@@ -331,11 +361,22 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
   }
 
   private func portDictionary(_ port: AVAudioSessionPortDescription) -> [String: String] {
-    ["name": port.portName, "type": port.portType.rawValue, "uid": port.uid, "vehicle": VehicleFingerprint.matching(port)?.name ?? "unknown"]
+    ["name": port.portName, "type": port.portType.rawValue, "uid": port.uid, "vehicle": matchingVehicle(port)?.name ?? "unknown"]
   }
 
   private var currentVehicle: VehicleFingerprint? {
-    AVAudioSession.sharedInstance().currentRoute.outputs.compactMap(VehicleFingerprint.matching).first
+    AVAudioSession.sharedInstance().currentRoute.outputs.compactMap(matchingVehicle).first
+  }
+
+  private func matchingVehicle(_ port: AVAudioSessionPortDescription) -> VehicleFingerprint? {
+    let identity = routeIdentity(port)
+    return VehicleFingerprint.all.first {
+      eventStore.runtime(key: "vehicle_route_uid_\($0.id)") == identity
+    } ?? VehicleFingerprint.matching(port)
+  }
+
+  private func routeIdentity(_ port: AVAudioSessionPortDescription) -> String {
+    port.portType == .carAudio ? VehicleFingerprint.normalizedCarPlayUID(port.uid) : port.uid
   }
 
   private func transition(to newState: String, source: String, payload: [String: Any] = [:], eventId: String = UUID().uuidString) {

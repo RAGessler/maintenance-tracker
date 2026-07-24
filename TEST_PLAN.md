@@ -25,15 +25,22 @@ Do not count simulator, Expo Go, or manual button behavior as proof of locked-sc
 4. Connect the stereo and use **Set current car route** before creating the Bluetooth automation.
 5. If Allow Once was selected, enable Always Location in Settings; iOS cannot distinguish Allow
    Once from normal When In Use authorization in the same session.
+6. For wired CarPlay, run **Configure Vehicle Route** with the intended vehicle selected while its
+   CarPlay route is connected. Repeat setup if the vehicle or head unit changes.
 
 ## Automation setup
 
 | Automation | Trigger | Action | Required setting |
 | --- | --- | --- | --- |
-| CarPlay start | CarPlay Connects | Start Trip, CarPlay | Run immediately |
-| CarPlay end | CarPlay Disconnects | End Trip, vehicle, CarPlay | Run immediately |
-| Bluetooth start | Selected stereo Connects | Start Trip, Bluetooth stereo | Run immediately |
-| Bluetooth end | Selected stereo Disconnects | End Trip, vehicle, Bluetooth stereo | Run immediately |
+| CarPlay start | CarPlay Connects | Run configured vehicle Start Shortcut | Run immediately |
+| CarPlay end | CarPlay Disconnects | Run configured vehicle End Shortcut | Run immediately |
+| Bluetooth start | Selected stereo Connects | Run configured vehicle Start Shortcut | Run immediately |
+| Bluetooth end | Selected stereo Disconnects | Run configured vehicle End Shortcut | Run immediately |
+
+Create each normal Shortcut first. Its Maintenance Tracker action binds the immutable vehicle choice
+and CarPlay or Bluetooth trigger provenance. The Personal Automation then binds the exact CarPlay or
+selected-device event and invokes that configured Shortcut with **Run Shortcut**. The Automation
+editor does not expose the dynamic vehicle parameter when the app action is added directly.
 
 The physical test iPhone exposes selected-device Bluetooth connect and disconnect automations.
 Matching audio-route loss and the three-minute reconnect grace remain a fallback when the disconnect
@@ -81,6 +88,7 @@ public issue.
 | VEH-BT-02 | Selected Bluetooth stereo disconnects while locked; End Trip selects the same vehicle and Bluetooth | Matching trip completes; event source is Bluetooth |
 | VEH-WCP-01 | Wireless CarPlay connects while locked; its paired Bluetooth automation selects the vehicle | Record Bluetooth intent and CarPlay route ordering; one candidate exists for the selected vehicle |
 | VEH-WCP-02 | Wireless CarPlay disconnects while locked | Record Bluetooth and CarPlay disconnect ordering; the matching trip completes only once |
+| VEH-WCP-03 | Setup Bluetooth disconnects during wireless CarPlay handoff | `end-deferred-carplay-active` is recorded and the trip remains open while CarPlay is present |
 | VEH-CP-01 | Wired CarPlay connects while locked; Start Trip selects that vehicle and CarPlay | Requested and recognized vehicles match after route capture |
 | VEH-CP-02 | Repeat VEH-CP-01 after iPhone and head-unit restart | The same vehicle is recognized, or the heuristic is rejected as unreliable |
 | VEH-MM-01 | Connect one recognized vehicle but run Start Trip with a different vehicle selected | Trip fails with `vehicle-route-mismatch`; location tracking does not remain active |
@@ -88,6 +96,7 @@ public issue.
 | VEH-END-01 | While one vehicle is active, run End Trip with a different vehicle selected | End is rejected with `vehicle-mismatch`; the active trip remains active |
 | VEH-STALE-01 | Preserve an automation, remove its vehicle from the next signed test build, then run it | The unavailable entity reaches the intent and logs `start-rejected-vehicle-unavailable`; no trip starts |
 | VEH-REASSIGN-01 | Edit VEH-STALE-01 to select another active vehicle, then run it on that vehicle | The new immutable vehicle ID is used; the removed ID is not rebound or reused |
+| VEH-ROUTE-REASSIGN-01 | Configure one observed route for Vehicle A, then configure the same route for Vehicle B and restart the app | Vehicle A no longer matches the route; Vehicle B still matches after restart |
 
 For each failure case, reopen the app after the locked test and export diagnostics. A dialog alone is
 not sufficient evidence because automation notifications may be suppressed.

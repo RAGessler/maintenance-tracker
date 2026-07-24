@@ -1,11 +1,13 @@
 # iOS Car-Stereo Trigger Results
 
-Issue: [#2](https://github.com/RAGessler/maintenance-tracker/issues/2)
+Issues: [iOS car-stereo trip triggers](https://github.com/RAGessler/maintenance-tracker/issues/2),
+[per-vehicle Shortcut identity](https://github.com/RAGessler/maintenance-tracker/issues/67)
 
 ## Current disposition
 
-Implementation complete enough for physical-device feasibility testing. Vehicle behavior is not yet
-proven.
+**ADAPT.** Physical testing proves selected-device Bluetooth identity, dynamic vehicle-bound
+Shortcuts, locked/background execution, and configured route corroboration. Production behavior must
+preserve the limitations and review fallbacks in the per-vehicle disposition below.
 
 ## Proven in repository validation
 
@@ -22,12 +24,10 @@ proven.
 
 ## Not yet proven
 
-- App Intent execution from CarPlay or Bluetooth personal automations on a physical iPhone.
-- Starting Core Location while locked or backgrounded after the App Intent returns.
-- Audio-route notification delivery throughout a physical drive.
-- CarPlay and Bluetooth-only vehicle route names and port types.
-- Reconnect-grace behavior under real stereo interruptions.
 - Distance quality, battery impact, normal OS eviction, and force-quit behavior.
+- Stability of configured normalized CarPlay routes after iPhone and head-unit restarts.
+- Physical stale/archived Shortcut entity rehydration and exclusive route reassignment after process
+  restart; the diagnostic code handles these cases, but this session did not exercise them end to end.
 - App Store review acceptance of the final background-location explanation and behavior.
 
 ## Design observations
@@ -81,6 +81,58 @@ identify Cars A or B.
 
 ## Physical results
 
+### Per-vehicle Shortcut identity
+
+Physical testing on 2026-07-24 used a signed development build on an iPhone running iOS 26.5.2.
+The app was backgrounded and the phone locked for both runs. The exported diagnostics remain local
+because they contain private route identifiers; the results below are the redacted evidence summary.
+
+- A normal Shortcut can bind a dynamic vehicle entity and trigger provenance. A Personal Automation
+  can bind an exact Bluetooth device or CarPlay event and invoke that configured Shortcut.
+- Car C's selected-device Bluetooth connect automation invoked Start Trip for Car C before its audio
+  route appeared. The route arrived three seconds later, matched Car C, and the candidate continued.
+- Car C's selected-device Bluetooth disconnect automation invoked End Trip for Car C and completed
+  the same candidate. This passes the locked/background Bluetooth identity start/end path.
+- Car A's CarPlay connect automation invoked a configured Start Trip Shortcut for Car A. The Shortcut
+  was mistakenly labelled with Bluetooth trigger provenance, but the CarPlay route still matched Car
+  A, movement promoted the candidate to active, and no duplicate trip was created. This proves locked
+  dynamic vehicle binding, not selected-device Bluetooth behavior for wireless CarPlay.
+- Car A completed from the CarPlay disconnect action. Selected-device Bluetooth connect/disconnect
+  ordering for wireless CarPlay remains untested.
+- A follow-up selected-device run showed the wireless handoff order: Bluetooth Connect invoked Start,
+  CarPlay became the selected route six seconds later, and Bluetooth Disconnect invoked End two
+  seconds after that while CarPlay remained active. The unguarded End action incorrectly completed
+  the trip. This is a failed test and establishes that Bluetooth Disconnect is only an end candidate
+  for wireless CarPlay, never sufficient evidence to finalize by itself.
+- The route-aware fix was then exercised while CarPlay remained current. Bluetooth End recorded
+  `end-deferred-carplay-active`, and the Car A candidate remained open. Selected-device Bluetooth is
+  therefore suitable for wireless-CarPlay start identity, but not as a final end signal.
+- Wired CarPlay Connect invoked the configured Car B Shortcut before `.carAudio` was visible. The
+  route appeared only after media playback began, 18 seconds after Start, then matched the locally
+  configured normalized route and Car B. Wired route identity is delayed, optional corroboration;
+  it cannot be required at trigger time or assumed to appear without audio playback.
+- Before setup, the same wired route failed safely as unrecognized. With Car B configured and its
+  route active, Car A Start failed with `vehicle-route-mismatch`; Car B Start succeeded; Car A End was
+  rejected; and Car B End completed the same candidate.
+
+Disposition: **ADAPT**. Use immutable vehicle parameters in user-created normal Shortcuts. Bind exact
+selected-device Bluetooth Personal Automations to those Shortcuts for Bluetooth-only vehicles and
+wireless-CarPlay starts. Ignore or defer Bluetooth disconnect while CarPlay remains active. Generic
+wired-CarPlay automations cannot identify a vehicle by themselves; retain the user's requested
+vehicle as candidate attribution, accept a configured normalized route only as delayed corroboration,
+and require review when route evidence is absent, unknown, or conflicting.
+
+| Test ID | Device / iOS | Vehicle / connection | App state | Result | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| VEH-BT-01 / VEH-BT-02 | Physical iPhone / iOS 26.5.2 | Car C / Bluetooth only | Background, locked | Pass | Local redacted review of `car-stereo-evidence-1784924040409.json` |
+| VEH-WCP-01 | Physical iPhone / iOS 26.5.2 | Car A / wireless CarPlay | Background, locked | Pass | Selected Bluetooth Start bound Car A before CarPlay route arrival in local export `car-stereo-evidence-1784924907743.json` |
+| VEH-WCP-02 | Physical iPhone / iOS 26.5.2 | Car A / wireless CarPlay | Background, locked | Adapt | Bluetooth disconnect is a handoff signal; actual route loss remains the end candidate |
+| VEH-WCP-03 | Physical iPhone / iOS 26.5.2 | Car A / wireless CarPlay handoff | Background, locked | Fail | Bluetooth End completed while CarPlay remained current in local export `car-stereo-evidence-1784924907743.json` |
+| VEH-WCP-03 regression | Physical iPhone / iOS 26.5.2 | Car A / wireless CarPlay handoff | CarPlay active | Pass | Bluetooth End deferred and candidate remained open in local export `car-stereo-evidence-1784925699569.json` |
+| VEH-CP-01 | Physical iPhone / iOS 26.5.2 | Car B / wired CarPlay | Background, locked | Pass with limitation | Configured route matched only after media playback in local export `car-stereo-evidence-1784930265573.json` |
+| VEH-MM-01 / VEH-END-01 | Physical iPhone / iOS 26.5.2 | Car A request on Car B route | Foreground | Pass | Wrong Start failed and wrong End was rejected in local export `car-stereo-evidence-1784930575348.json` |
+| VEH-UNK-01 | Physical iPhone / iOS 26.5.2 | Unconfigured wired CarPlay | Background, locked | Pass | Unknown route failed safely in local export `car-stereo-evidence-1784929118798.json` |
+
 ### Validated CarPlay behavior
 
 Physical testing on 2026-07-23 validates the core CarPlay spike on a signed development build:
@@ -97,10 +149,8 @@ Physical testing on 2026-07-23 validates the core CarPlay spike on a signed deve
   displayed `0.9 mi`. Since the car display is only precise to `0.1 mi`, this is a promising
   preliminary accuracy result, not a calibrated mileage guarantee.
 
-The remaining distinct trigger path to validate is Car C's Bluetooth-only stereo. The physical
-test iPhone confirms that selected-device Bluetooth connect and disconnect automations are
-available for `GTA Car Kit`, so Car C should exercise the same start/end App Intent flow as CarPlay
-while also confirming its Bluetooth route fingerprint and locked-screen behavior.
+Car C's Bluetooth-only selected-device start and end path was subsequently validated in the
+per-vehicle identity investigation above.
 
 | Test ID | Device / iOS | Vehicle / stereo | App state | Result | Evidence | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -111,4 +161,3 @@ while also confirming its Bluetooth route fingerprint and locked-screen behavior
 | ID-01 | Physical iPhone | Car A | Foreground and background | Pass | `car-stereo-evidence-1784826706270.json`, `car-stereo-evidence-1784827903078.json` | Car A selected repeatedly despite changing final `AudioMain` numeric suffix |
 | ID-02 | Physical iPhone | Car B | Foreground | Pass, identification only | `car-stereo-evidence-1784827903078.json` | Car B selected correctly; run did not reach movement threshold |
 | DIST-01 | Physical iPhone | Car A | Background, phone locked | Preliminary pass | User-observed | `0.94 mi` phone estimate versus `0.9 mi` odometer display |
-| Pending | Pending | Pending | Pending | Not run | Pending | Follow `TEST_PLAN.md` |
