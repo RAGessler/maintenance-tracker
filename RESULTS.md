@@ -26,8 +26,8 @@ preserve the limitations and review fallbacks in the per-vehicle disposition bel
 
 - Distance quality, battery impact, normal OS eviction, and force-quit behavior.
 - Stability of configured normalized CarPlay routes after iPhone and head-unit restarts.
-- Physical stale/archived Shortcut entity rehydration and exclusive route reassignment after process
-  restart; the diagnostic code handles these cases, but this session did not exercise them end to end.
+- Exclusive route reassignment after process restart; the diagnostic code handles it, but this
+  session did not exercise it end to end.
 - App Store review acceptance of the final background-location explanation and behavior.
 
 ## Design observations
@@ -114,6 +114,10 @@ because they contain private route identifiers; the results below are the redact
 - Before setup, the same wired route failed safely as unrecognized. With Car B configured and its
   route active, Car A Start failed with `vehicle-route-mismatch`; Car B Start succeeded; Car A End was
   rejected; and Car B End completed the same candidate.
+- A saved Car C Shortcut was invoked against a temporary signed build where Car C was absent from the
+  active catalog. The entity rehydrated as unavailable, the coordinator logged
+  `start-rejected-vehicle-unavailable`, and no trip state changed. The temporary archive marker was
+  removed after the test.
 
 Disposition: **ADAPT**. Use immutable vehicle parameters in user-created normal Shortcuts. Bind exact
 selected-device Bluetooth Personal Automations to those Shortcuts for Bluetooth-only vehicles and
@@ -132,6 +136,7 @@ and require review when route evidence is absent, unknown, or conflicting.
 | VEH-CP-01 | Physical iPhone / iOS 26.5.2 | Car B / wired CarPlay | Background, locked | Pass with limitation | Configured route matched only after media playback in local export `car-stereo-evidence-1784930265573.json` |
 | VEH-MM-01 / VEH-END-01 | Physical iPhone / iOS 26.5.2 | Car A request on Car B route | Foreground | Pass | Wrong Start failed and wrong End was rejected in local export `car-stereo-evidence-1784930575348.json` |
 | VEH-UNK-01 | Physical iPhone / iOS 26.5.2 | Unconfigured wired CarPlay | Background, locked | Pass | Unknown route failed safely in local export `car-stereo-evidence-1784929118798.json` |
+| VEH-STALE-01 | Physical iPhone / iOS 26.5.2 | Archived Car C Shortcut | Foreground | Pass | Stale entity was rejected without a new trip in local export `car-stereo-evidence-1784931248951.json` |
 
 ### Validated CarPlay behavior
 

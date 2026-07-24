@@ -67,7 +67,9 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
       return "already-tracking"
     }
 
-    let requestedVehicle = vehicleId.flatMap(VehicleFingerprint.identified)
+    let requestedVehicle = vehicleId.flatMap { id in
+      VehicleChoice.all.contains(where: { $0.id == id }) ? VehicleFingerprint.identified(by: id) : nil
+    }
     if vehicleId != nil && requestedVehicle == nil {
       emit(source: source, name: "start-rejected-vehicle-unavailable", payload: ["vehicleId": vehicleId!], eventId: eventId)
       return "vehicle-unavailable"
