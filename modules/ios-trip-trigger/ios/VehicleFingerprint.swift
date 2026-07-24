@@ -39,6 +39,10 @@ struct VehicleFingerprint {
     all.first { $0.name == name }
   }
 
+  static func identified(by id: String?) -> VehicleFingerprint? {
+    all.first { $0.id == id }
+  }
+
   static func normalizedCarPlayUID(_ uid: String) -> String {
     guard let range = uid.range(of: "-Audio-AudioMain-") else { return uid }
     return String(uid[..<range.upperBound]).dropLast().description

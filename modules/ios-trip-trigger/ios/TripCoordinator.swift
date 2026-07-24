@@ -2,6 +2,11 @@ import AVFAudio
 import CoreLocation
 import Foundation
 
+public struct VehicleChoice: Sendable {
+  public let id: String
+  public let name: String
+}
+
 @MainActor
 public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
   public static let shared = TripCoordinator()
@@ -14,6 +19,7 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
   private var firstCandidateLocation: CLLocation?
   private var selectedRouteName: String?
   private var selectedRouteUID: String?
+  private var selectedVehicleId: String?
   private var selectedVehicleName: String?
 
   var onEvent: ((StoredEvent) -> Void)?
@@ -27,6 +33,7 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
     locationManager.showsBackgroundLocationIndicator = true
     selectedRouteName = eventStore.runtime(key: "selected_route_name")
     selectedRouteUID = eventStore.runtime(key: "selected_route_uid")
+    selectedVehicleId = eventStore.runtime(key: "selected_vehicle_id")
     selectedVehicleName = eventStore.runtime(key: "selected_vehicle_name")
     observeAudioRoutes()
     resumeTrackingIfNeeded()
@@ -49,17 +56,27 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
   }
 
   @discardableResult
-  public func startTrip(source: String, eventId: String = UUID().uuidString) -> String {
+  public func startTrip(source: String, vehicleId: String? = nil, eventId: String = UUID().uuidString) -> String {
     let currentState = state
     if currentState != "idle" && currentState != "completed" && currentState != "failed" {
       emit(source: source, name: "start-ignored-already-tracking", payload: ["state": currentState], eventId: eventId)
       return "already-tracking"
     }
 
+    let requestedVehicle = vehicleId.flatMap(VehicleFingerprint.identified)
+    if vehicleId != nil && requestedVehicle == nil {
+      emit(source: source, name: "start-rejected-vehicle-unavailable", payload: ["vehicleId": vehicleId!], eventId: eventId)
+      return "vehicle-unavailable"
+    }
+
     let newTripId = UUID().uuidString
     eventStore.setRuntime(key: "trip_id", value: newTripId)
     eventStore.setRuntime(key: "trigger_source", value: source)
+    eventStore.setRuntime(key: "failure_reason", value: nil)
+    eventStore.setRuntime(key: "requested_vehicle_id", value: requestedVehicle?.id)
+    eventStore.setRuntime(key: "requested_vehicle_name", value: requestedVehicle?.name)
     eventStore.beginTrip(id: newTripId, source: source)
+    eventStore.setTripVehicle(id: newTripId, vehicleName: requestedVehicle?.name)
     eventStore.setRuntime(key: "candidate_deadline", value: isoFormatter.string(from: Date().addingTimeInterval(600)))
     if source != "manual" {
       eventStore.setRuntime(key: "route_capture_deadline", value: isoFormatter.string(from: Date().addingTimeInterval(60)))
@@ -67,6 +84,9 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
     transition(to: "start-candidate", source: source, eventId: eventId)
     firstCandidateLocation = nil
     captureSelectedRoute()
+    if state == "failed" {
+      return eventStore.runtime(key: "failure_reason") ?? "failed"
+    }
 
     guard locationManager.authorizationStatus == .authorizedAlways else {
       transition(to: "failed", source: "location", payload: ["reason": "always-location-required"])
@@ -83,10 +103,17 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
   }
 
   @discardableResult
-  public func endTrip(source: String, eventId: String = UUID().uuidString) -> String {
+  public func endTrip(source: String, vehicleId: String? = nil, eventId: String = UUID().uuidString) -> String {
     guard ["start-candidate", "awaiting-movement", "active", "reconnect-grace-period"].contains(state) else {
       emit(source: source, name: "end-ignored-no-active-trip", eventId: eventId)
       return "no-active-trip"
+    }
+    if let vehicleId, vehicleId != eventStore.runtime(key: "requested_vehicle_id") {
+      emit(source: source, name: "end-rejected-vehicle-mismatch", payload: [
+        "activeVehicleId": eventStore.runtime(key: "requested_vehicle_id") ?? "none",
+        "requestedVehicleId": vehicleId
+      ], eventId: eventId)
+      return "vehicle-mismatch"
     }
     locationManager.stopUpdatingLocation()
     clearDeadlines()
@@ -107,11 +134,16 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
     return true
   }
 
+  public func availableVehicles() -> [VehicleChoice] {
+    VehicleFingerprint.all.map { VehicleChoice(id: $0.id, name: $0.name) }
+  }
+
   public func deleteAllData() {
     locationManager.stopUpdatingLocation()
     deadlineTask?.cancel()
     selectedRouteName = nil
     selectedRouteUID = nil
+    selectedVehicleId = nil
     selectedVehicleName = nil
     eventStore.clearAll()
   }
@@ -122,6 +154,7 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
       "locationAuthorization": authorizationDescription,
       "currentRoute": currentRouteDictionaries(),
       "selectedRouteName": selectedRouteName,
+      "requestedVehicleName": eventStore.runtime(key: "requested_vehicle_name"),
       "selectedVehicleName": selectedVehicleName,
       "currentVehicleName": currentVehicle?.name,
       "configuredRouteName": eventStore.runtime(key: "configured_route_name"),
@@ -253,17 +286,39 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
     if source == "carplay" {
       port = outputs.first { $0.portType == .carAudio }
     } else if source == "bluetooth" {
-      port = outputs.first { VehicleFingerprint.matching($0)?.isCarPlay == false } ?? outputs.first { $0.uid == configuredUID }
+      port = outputs.first { VehicleFingerprint.matching($0)?.isCarPlay == false }
+        ?? outputs.first { $0.uid == configuredUID }
+        ?? outputs.first { VehicleFingerprint.matching($0)?.isCarPlay == true }
     } else {
       port = outputs.first { $0.uid == configuredUID } ?? outputs.first { $0.portType == .carAudio }
     }
     selectedRouteName = port?.portName
     selectedRouteUID = port?.uid
-    selectedVehicleName = port.flatMap(VehicleFingerprint.matching)?.name
+    let matchedVehicle = port.flatMap(VehicleFingerprint.matching)
+    selectedVehicleId = matchedVehicle?.id
+    selectedVehicleName = matchedVehicle?.name
     eventStore.setRuntime(key: "selected_route_name", value: selectedRouteName)
     eventStore.setRuntime(key: "selected_route_uid", value: selectedRouteUID)
+    eventStore.setRuntime(key: "selected_vehicle_id", value: selectedVehicleId)
     eventStore.setRuntime(key: "selected_vehicle_name", value: selectedVehicleName)
-    eventStore.setTripVehicle(id: tripId, vehicleName: selectedVehicleName)
+    let requestedVehicleId = eventStore.runtime(key: "requested_vehicle_id")
+    if let requestedVehicleId, port != nil {
+      guard let matchedVehicle else {
+        failTrip(reason: "vehicle-route-unrecognized")
+        return
+      }
+      guard requestedVehicleId == matchedVehicle.id else {
+        emit(source: "audio-route", name: "vehicle-route-mismatch", payload: [
+          "requestedVehicleId": requestedVehicleId,
+          "observedVehicleId": matchedVehicle.id
+        ])
+        failTrip(reason: "vehicle-route-mismatch")
+        return
+      }
+    }
+    if requestedVehicleId == nil {
+      eventStore.setTripVehicle(id: tripId, vehicleName: selectedVehicleName)
+    }
     if port != nil {
       eventStore.setRuntime(key: "route_capture_deadline", value: nil)
     }
@@ -336,6 +391,7 @@ public final class TripCoordinator: NSObject, CLLocationManagerDelegate {
   private func failTrip(reason: String) {
     locationManager.stopUpdatingLocation()
     clearDeadlines()
+    eventStore.setRuntime(key: "failure_reason", value: reason)
     transition(to: "failed", source: "state-machine", payload: ["reason": reason])
   }
 

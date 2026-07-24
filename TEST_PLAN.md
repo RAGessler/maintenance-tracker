@@ -1,6 +1,7 @@
 # iOS Car-Stereo Trigger Test Plan
 
-Issue: [#2](https://github.com/RAGessler/maintenance-tracker/issues/2)
+Issues: [iOS car-stereo trip triggers](https://github.com/RAGessler/maintenance-tracker/issues/2),
+[per-vehicle Shortcut identity](https://github.com/RAGessler/maintenance-tracker/issues/67)
 
 ## Evidence requirements
 
@@ -30,9 +31,9 @@ Do not count simulator, Expo Go, or manual button behavior as proof of locked-sc
 | Automation | Trigger | Action | Required setting |
 | --- | --- | --- | --- |
 | CarPlay start | CarPlay Connects | Start Trip, CarPlay | Run immediately |
-| CarPlay end | CarPlay Disconnects | End Trip | Run immediately |
+| CarPlay end | CarPlay Disconnects | End Trip, vehicle, CarPlay | Run immediately |
 | Bluetooth start | Selected stereo Connects | Start Trip, Bluetooth stereo | Run immediately |
-| Bluetooth end | Selected stereo Disconnects | End Trip | Run immediately |
+| Bluetooth end | Selected stereo Disconnects | End Trip, vehicle, Bluetooth stereo | Run immediately |
 
 The physical test iPhone exposes selected-device Bluetooth connect and disconnect automations.
 Matching audio-route loss and the three-minute reconnect grace remain a fallback when the disconnect
@@ -67,6 +68,29 @@ automation is delayed or missed.
 | ID-03 | Repeat ID-01 after iPhone reboot and head-unit reboot | Determine whether a normalized CarPlay UID is usable only as a heuristic |
 | ID-04 | Connect Car C's `GTA Car Kit` Bluetooth stereo | Confirm selected-Bluetooth automation and `00:18:E4:DC:DA:D7-tacl` route identity; do not classify it as CarPlay |
 | DIST-01 | Drive a known odometer distance with a recognized vehicle | Compare displayed estimated miles and accepted-fix count with the odometer; record the error and conditions |
+
+## Per-vehicle Shortcut identity matrix
+
+Use a signed build containing the vehicle-parameterized Start Trip and End Trip intents. For every
+run, record the selected vehicle and trigger type, but redact route UIDs from anything attached to a
+public issue.
+
+| ID | Scenario | Expected evidence |
+| --- | --- | --- |
+| VEH-BT-01 | Selected Bluetooth stereo connects while locked; Start Trip selects that vehicle and Bluetooth | Requested and recognized vehicles match; candidate starts without opening the app |
+| VEH-BT-02 | Selected Bluetooth stereo disconnects while locked; End Trip selects the same vehicle and Bluetooth | Matching trip completes; event source is Bluetooth |
+| VEH-WCP-01 | Wireless CarPlay connects while locked; its paired Bluetooth automation selects the vehicle | Record Bluetooth intent and CarPlay route ordering; one candidate exists for the selected vehicle |
+| VEH-WCP-02 | Wireless CarPlay disconnects while locked | Record Bluetooth and CarPlay disconnect ordering; the matching trip completes only once |
+| VEH-CP-01 | Wired CarPlay connects while locked; Start Trip selects that vehicle and CarPlay | Requested and recognized vehicles match after route capture |
+| VEH-CP-02 | Repeat VEH-CP-01 after iPhone and head-unit restart | The same vehicle is recognized, or the heuristic is rejected as unreliable |
+| VEH-MM-01 | Connect one recognized vehicle but run Start Trip with a different vehicle selected | Trip fails with `vehicle-route-mismatch`; location tracking does not remain active |
+| VEH-UNK-01 | Run a vehicle-bound Start Trip with a present car route not in the test registry | Trip fails with `vehicle-route-unrecognized`; location tracking does not remain active |
+| VEH-END-01 | While one vehicle is active, run End Trip with a different vehicle selected | End is rejected with `vehicle-mismatch`; the active trip remains active |
+| VEH-STALE-01 | Preserve an automation, remove its vehicle from the next signed test build, then run it | The unavailable entity reaches the intent and logs `start-rejected-vehicle-unavailable`; no trip starts |
+| VEH-REASSIGN-01 | Edit VEH-STALE-01 to select another active vehicle, then run it on that vehicle | The new immutable vehicle ID is used; the removed ID is not rebound or reused |
+
+For each failure case, reopen the app after the locked test and export diagnostics. A dialog alone is
+not sufficient evidence because automation notifications may be suppressed.
 
 ## Acceptance
 

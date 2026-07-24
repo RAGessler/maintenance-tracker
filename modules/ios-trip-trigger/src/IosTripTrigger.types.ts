@@ -17,6 +17,7 @@ export interface NativeStatus {
   currentRoute: AudioPort[];
   configuredRouteName: string | null;
   currentVehicleName: string | null;
+  requestedVehicleName: string | null;
   selectedRouteName: string | null;
   selectedVehicleName: string | null;
   tripId: string | null;

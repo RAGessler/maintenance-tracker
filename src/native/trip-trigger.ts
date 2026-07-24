@@ -13,6 +13,7 @@ const unsupportedStatus: NativeStatus = {
   currentRoute: [],
   configuredRouteName: null,
   currentVehicleName: null,
+  requestedVehicleName: null,
   selectedRouteName: null,
   selectedVehicleName: null,
   tripId: null,

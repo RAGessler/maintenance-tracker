@@ -52,6 +52,7 @@ export default function TripScreen() {
           </View>
           <Detail label="Location" value={status?.locationAuthorization ?? 'checking'} />
           <Detail label="Trigger route" value={status?.selectedRouteName ?? 'not captured'} />
+          <Detail label="Requested vehicle" value={status?.requestedVehicleName ?? 'none'} />
           <Detail label="Recognized vehicle" value={status?.selectedVehicleName ?? status?.currentVehicleName ?? 'unknown'} />
           <Detail label="Configured car" value={status?.configuredRouteName ?? 'not configured'} />
           <Detail label="Trip ID" value={status?.tripId ?? 'none'} code />
@@ -69,9 +70,9 @@ export default function TripScreen() {
         <Card title="One-time setup">
           <SetupStep number="1" text="Grant Always Location while the app is open." />
           <SetupStep number="2" text="Connect the car stereo, then set the current route as the car." />
-          <SetupStep number="3" text="Create CarPlay Connect → Start Trip (CarPlay)." />
-          <SetupStep number="4" text="Create CarPlay Disconnect → End Trip." />
-          <SetupStep number="5" text="Create Bluetooth Connect → Start Trip and Disconnect → End Trip." />
+          <SetupStep number="3" text="Create CarPlay Connect → Start Trip and choose this vehicle." />
+          <SetupStep number="4" text="Create CarPlay Disconnect → End Trip with the same vehicle." />
+          <SetupStep number="5" text="Create Bluetooth Connect/Disconnect automations with the same vehicle choices." />
           <ThemedText type="small" themeColor="textSecondary">
             Set each automation to run immediately. Matching audio-route loss supplies reconnect
             grace if a Bluetooth disconnect automation is delayed or missed.
