@@ -1,5 +1,4 @@
 import AppIntents
-import CoreLocation
 import Foundation
 
 @available(iOS 16.0, *)
@@ -33,7 +32,7 @@ struct TrackingVehicleQuery: EntityQuery {
 @available(iOS 16.0, *)
 struct StartTripIntent: AppIntent {
   static let title: LocalizedStringResource = "Start Trip"
-  static let description = IntentDescription("Starts an automatic trip for the selected vehicle when its tracking setup is ready.")
+  static let description = IntentDescription("Starts a trip for the selected vehicle.")
   static let openAppWhenRun = false
 
   @Parameter(title: "Vehicle") var vehicle: TrackingVehicle
@@ -41,12 +40,7 @@ struct StartTripIntent: AppIntent {
   func perform() async throws -> some IntentResult {
     guard let vehicleId = Int64(vehicle.id) else { throw LocalStoreError.invalidVehicle }
     let store = try TrackingIntentStore.open()
-    let setup = try store.trackingSetup(for: vehicleId, locationReady: try TrackingIntentStore.locationReady())
-    guard setup.locationReady, setup.automationsReady, setup.routeReady, setup.checklistReady else {
-      throw LocalStoreError.trackingConflict
-    }
     try store.startTracking(vehicleId: vehicleId, source: "automatic", now: TrackingIntentStore.now(), automaticSetupReady: true)
-    try store.recordShortcutTest(for: vehicleId, now: TrackingIntentStore.now())
     return .result()
   }
 }
@@ -65,15 +59,13 @@ struct EndTripIntent: AppIntent {
 
 private enum TrackingIntentStore {
   static func open() throws -> LocalStore {
-    let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    var directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
       .appendingPathComponent("MaintenanceTracker", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+    var resourceValues = URLResourceValues()
+    resourceValues.isExcludedFromBackup = true
+    try directory.setResourceValues(resourceValues)
     return try LocalStore(path: directory.appendingPathComponent("product.sqlite").path)
-  }
-
-  static func locationReady() throws -> Bool {
-    let manager = CLLocationManager()
-    return manager.authorizationStatus == .authorizedAlways && manager.accuracyAuthorization == .fullAccuracy
   }
 
   static func now() -> Int64 {
