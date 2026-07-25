@@ -17,9 +17,11 @@ public class MaintenanceStoreModule: Module {
     }
 
     AsyncFunction("createVehicle") {
-      (nickname: String, year: Int, make: String, model: String, initialOdometerMilliMiles: Double) throws -> [String: Any] in
-      guard initialOdometerMilliMiles.rounded() == initialOdometerMilliMiles,
-            initialOdometerMilliMiles <= Double(Int64.max) else {
+      (nickname: String, year: Int, make: String, model: String, initialOdometerMilliMiles: String) throws -> [String: Any] in
+      guard !initialOdometerMilliMiles.isEmpty,
+            initialOdometerMilliMiles.allSatisfy(\.isNumber),
+            let milliMiles = Int64(initialOdometerMilliMiles),
+            milliMiles >= 0 else {
         throw LocalStoreError.invalidVehicle
       }
       let vehicle = try self.localStore().createVehicle(
@@ -27,7 +29,7 @@ public class MaintenanceStoreModule: Module {
         year: year,
         make: make,
         model: model,
-        initialOdometerMilliMiles: Int64(initialOdometerMilliMiles),
+        initialOdometerMilliMiles: milliMiles,
         now: Self.now()
       )
       return ["id": String(vehicle.id), "nickname": vehicle.nickname, "year": vehicle.year, "make": vehicle.make, "model": vehicle.model]

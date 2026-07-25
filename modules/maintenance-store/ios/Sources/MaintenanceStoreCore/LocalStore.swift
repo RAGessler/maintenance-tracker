@@ -43,7 +43,6 @@ public final class LocalStore: @unchecked Sendable {
     database = connection
     try configure(connection)
     try migrate(connection)
-    try clearTemporaryPreciseState()
   }
 
   deinit {
@@ -271,12 +270,6 @@ public final class LocalStore: @unchecked Sendable {
     defer { sqlite3_finalize(statement) }
     if sqlite3_step(statement) == SQLITE_ROW {
       throw LocalStoreError.sqlite("Foreign-key validation failed")
-    }
-  }
-
-  private func clearTemporaryPreciseState() throws {
-    try transaction {
-      try run("UPDATE tracking_session SET first_fix_blob = NULL, last_fix_blob = NULL", [])
     }
   }
 

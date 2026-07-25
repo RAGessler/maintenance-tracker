@@ -10,7 +10,7 @@ declare class MaintenanceStoreModule extends NativeModule<{}> implements NativeM
     year: number,
     make: string,
     model: string,
-    initialOdometerMilliMiles: number,
+    initialOdometerMilliMiles: string,
   ): Promise<{ id: string; nickname: string; year: number; make: string; model: string }>;
   getTrackingSnapshot(): Promise<{ state: 'idle' | 'tracking' }>;
   startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<{ state: 'idle' | 'tracking' }>;

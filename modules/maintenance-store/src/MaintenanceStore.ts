@@ -11,7 +11,7 @@ export type CreateVehicleInput = Readonly<{
   year: number;
   make: string;
   model: string;
-  initialOdometerMilliMiles: number;
+  initialOdometerMilliMiles: string;
 }>;
 
 export type Bootstrap = Readonly<{
@@ -31,7 +31,7 @@ export interface NativeMaintenanceStore {
     year: number,
     make: string,
     model: string,
-    initialOdometerMilliMiles: number,
+    initialOdometerMilliMiles: string,
   ): Promise<Vehicle>;
   getTrackingSnapshot(): Promise<TrackingSnapshot>;
   startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;

@@ -23,10 +23,10 @@ test('product-store creates a vehicle without exposing storage internals', async
     year: 2020,
     make: 'Honda',
     model: 'Civic',
-    initialOdometerMilliMiles: 42_125_000,
+    initialOdometerMilliMiles: '42125000',
   });
 
   assert.deepEqual(vehicle, { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' });
-  assert.deepEqual(calls, [['Daily', 2020, 'Honda', 'Civic', 42_125_000]]);
+  assert.deepEqual(calls, [['Daily', 2020, 'Honda', 'Civic', '42125000']]);
   assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'createVehicle', 'getBootstrap']);
 });
