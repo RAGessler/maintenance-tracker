@@ -290,6 +290,20 @@ func usesApprovedReadIndexes() throws {
   #expect(garagePlan.contains("odometer_latest"))
 }
 
+@Test("the v1 store enforces and validates foreign-key relationships")
+func enforcesForeignKeys() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  _ = try LocalStore(path: databaseURL.path)
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+  #expect(execute(database, "PRAGMA foreign_keys = ON") == SQLITE_OK)
+
+  #expect(execute(database, "INSERT INTO manual_odometer_reading (vehicle_id, effective_at, milli_miles, origin, created_at) VALUES (999, 1, 0, 'manual', 1)") == SQLITE_CONSTRAINT)
+  #expect(try scalar(database, "SELECT COUNT(*) FROM pragma_foreign_key_check") == 0)
+}
+
 private func insertTrip(
   _ database: OpaquePointer,
   source: String = "automatic",
