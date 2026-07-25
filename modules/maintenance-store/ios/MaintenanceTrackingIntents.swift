@@ -39,8 +39,7 @@ struct StartTripIntent: AppIntent {
 
   func perform() async throws -> some IntentResult {
     guard let vehicleId = Int64(vehicle.id) else { throw LocalStoreError.invalidVehicle }
-    let store = try TrackingIntentStore.open()
-    try store.startTracking(vehicleId: vehicleId, source: "automatic", now: TrackingIntentStore.now(), automaticSetupReady: true)
+    try await MainActor.run { try MaintenanceTrackingRuntime.shared.startAutomatic(vehicleID: vehicleId, now: TrackingIntentStore.now()) }
     return .result()
   }
 }
@@ -51,21 +50,28 @@ struct EndTripIntent: AppIntent {
   static let description = IntentDescription("Ends the current automatic trip.")
   static let openAppWhenRun = false
 
+  @Parameter(title: "Vehicle") var vehicle: TrackingVehicle
+
   func perform() async throws -> some IntentResult {
-    try TrackingIntentStore.open().stopTracking(now: TrackingIntentStore.now())
+    guard let vehicleId = Int64(vehicle.id) else { throw LocalStoreError.invalidVehicle }
+    try await MainActor.run { try MaintenanceTrackingRuntime.shared.end(vehicleID: vehicleId, now: TrackingIntentStore.now()) }
     return .result()
   }
 }
 
-private enum TrackingIntentStore {
+enum TrackingIntentStore {
   static func open() throws -> LocalStore {
-    var directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    let directory = try storeDirectory()
+    return try LocalStore(path: directory.appendingPathComponent("product.sqlite").path)
+  }
+
+  static func storeDirectory() throws -> URL {
+    let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
       .appendingPathComponent("MaintenanceTracker", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
-    var resourceValues = URLResourceValues()
-    resourceValues.isExcludedFromBackup = true
+    var resourceValues = URLResourceValues(); resourceValues.isExcludedFromBackup = true
     try directory.setResourceValues(resourceValues)
-    return try LocalStore(path: directory.appendingPathComponent("product.sqlite").path)
+    return directory
   }
 
   static func now() -> Int64 {

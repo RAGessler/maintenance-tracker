@@ -203,6 +203,9 @@ public class MaintenanceStoreModule: Module {
     }
 
     AsyncFunction("getTrackingSnapshot") { () throws -> [String: String] in
+      Task { @MainActor in
+        MaintenanceTrackingRuntime.shared.resume(now: Self.now())
+      }
       ["state": try self.localStore().trackingState()]
     }
 

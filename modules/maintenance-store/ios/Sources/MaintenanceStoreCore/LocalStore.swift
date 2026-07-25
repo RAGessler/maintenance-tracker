@@ -105,7 +105,7 @@ public struct StoredTrackingSetup: Sendable, Equatable {
 }
 
 /// The only owner of SQLite connections and durable product writes.
-public final class LocalStore: @unchecked Sendable {
+public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
   public static let currentSchemaVersion = 2
 
   private var database: OpaquePointer?
@@ -561,6 +561,12 @@ public final class LocalStore: @unchecked Sendable {
     }
   }
 
+  /// Native-only route lookup; opaque route values never cross the React Native bridge.
+  public func routeEvidence(for vehicleID: Int64, kind: String, opaqueValue: String) throws -> RouteEvidence {
+    guard let owner = try queryOne("SELECT vehicle_id FROM route_binding WHERE kind = ? AND opaque_value = ?", [.text(kind), .text(opaqueValue)]) else { return .unknown }
+    return owner[0] == vehicleID ? .matching : .conflicting
+  }
+
   public func recordShortcutTest(for vehicleId: Int64, now: Int64) throws {
     try transaction {
       guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
@@ -597,6 +603,66 @@ public final class LocalStore: @unchecked Sendable {
         """,
         [.integer(vehicleId), .text(source), .integer(now), .integer(now)]
       )
+    }
+  }
+
+  public func beginAutomatic(vehicleID: Int64, now: Int64) throws -> TrackingSession {
+    if let activeSession = try session() {
+      guard activeSession.vehicleID == vehicleID, activeSession.source == .automatic else { throw LocalStoreError.trackingConflict }
+      return activeSession
+    }
+    try transaction {
+      guard try queryOne("SELECT id FROM trigger_configuration WHERE vehicle_id = ? AND setup_completed_at IS NOT NULL AND tested_at IS NOT NULL", [.integer(vehicleID)]) != nil,
+            try queryOne("SELECT id FROM route_binding WHERE vehicle_id = ?", [.integer(vehicleID)]) != nil else {
+        throw LocalStoreError.trackingConflict
+      }
+    }
+    try startTracking(vehicleId: vehicleID, source: "automatic", now: now, automaticSetupReady: true)
+    guard var session = try session() else { throw LocalStoreError.sqlite("Tracking session was not created") }
+    session.movementDeadline = now + 600_000
+    session = TrackingSession(vehicleID: session.vehicleID, source: session.source, state: session.state, startedAt: session.startedAt, movementDeadline: session.movementDeadline, maximumDurationDeadline: now + 43_200_000, reconnectDeadline: session.reconnectDeadline, routeEvidence: session.routeEvidence, movementObserved: session.movementObserved, cumulativeMilliMiles: session.cumulativeMilliMiles)
+    try save(session)
+    return session
+  }
+
+  public func session() throws -> TrackingSession? {
+    guard let row = try queryOne("SELECT intended_vehicle_id, started_at, reconnect_deadline, movement_deadline, maximum_duration_deadline, corroboration_observed, movement_observed, cumulative_milli_miles FROM tracking_session WHERE id = 1", []) else { return nil }
+    let source = try trackingSessionSource() == "automatic" ? TrackingSource.automatic : .manual
+    return TrackingSession(
+      vehicleID: row[0], source: source,
+      state: row[2] > 0 ? .recovering : row[6] == 1 ? .active : .awaitingMovement,
+      startedAt: row[1], movementDeadline: row[3] > 0 ? row[3] : nil,
+      maximumDurationDeadline: row[4] > 0 ? row[4] : row[1] + 43_200_000,
+      reconnectDeadline: row[2] > 0 ? row[2] : nil,
+      routeEvidence: row[5] == 1 ? .matching : nil,
+      movementObserved: row[6] == 1, cumulativeMilliMiles: row[7]
+    )
+  }
+
+  public func save(_ session: TrackingSession) throws {
+    try transaction {
+      guard try queryOne("SELECT id FROM tracking_session WHERE id = 1 AND intended_vehicle_id = ?", [.integer(session.vehicleID)]) != nil else { throw LocalStoreError.trackingConflict }
+      try run(
+        "UPDATE tracking_session SET lifecycle_state = ?, updated_at = ?, reconnect_deadline = ?, movement_deadline = ?, maximum_duration_deadline = ?, corroboration_observed = ?, movement_observed = ?, cumulative_milli_miles = ? WHERE id = 1",
+        [.text(session.state == .recovering ? "recovering" : "tracking"), .integer(session.startedAt), session.reconnectDeadline.map(Binding.integer) ?? .null, session.movementDeadline.map(Binding.integer) ?? .null, .integer(session.maximumDurationDeadline), .integer(session.routeEvidence == .matching ? 1 : 0), .integer(session.movementObserved ? 1 : 0), .integer(session.cumulativeMilliMiles)]
+      )
+    }
+  }
+
+  public func finalize(_ finalization: TrackingFinalization, session: TrackingSession, now: Int64) throws {
+    try transaction {
+      guard try queryOne("SELECT id FROM tracking_session WHERE id = 1 AND intended_vehicle_id = ?", [.integer(session.vehicleID)]) != nil else { throw LocalStoreError.trackingConflict }
+      let source = session.source == .automatic ? "automatic" : "manual"
+      let route = source == "automatic" ? (finalization.reason == .unknownRoute ? "unknown" : finalization.reason == .conflictingRoute ? "conflicting" : session.routeEvidence == .matching ? "matched" : "not_observed") : "not_required"
+      let completion = finalization.completion == .explicitEnd ? "explicit_end" : finalization.completion == .routeLossAfterGrace ? "route_loss_after_grace" : "not_completed"
+      let reason = failureReason(finalization.reason)
+      let captured = finalization.distanceMilliMiles > 0 ? Binding.integer(finalization.distanceMilliMiles) : Binding.null
+      let effective = finalization.disposition == .confirmed ? captured : .null
+      let tripID = try insert("INSERT INTO trip (source, proposed_vehicle_id, started_at, ended_at, captured_milli_miles, movement_outcome, normal_completion_outcome, route_corroboration_outcome, quality_counters_json, failure_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)", [.text(source), .integer(session.vehicleID), .integer(session.startedAt), .integer(now), captured, .text(session.movementObserved ? "confirmed" : "not_confirmed"), .text(completion), .text(route), reason.map(Binding.text) ?? .null])
+      let disposition = finalization.disposition == .confirmed ? "confirmed" : "review_required"
+      try run("INSERT INTO trip_state (trip_id, vehicle_id, effective_milli_miles, disposition, updated_at) VALUES (?, ?, ?, ?, ?)", [.integer(tripID), .integer(session.vehicleID), effective, .text(disposition), .integer(now)])
+      try run("INSERT INTO trip_revision (trip_id, revision_number, occurred_at, actor, action, vehicle_id, effective_milli_miles, disposition, reason) VALUES (?, 1, ?, 'system', 'finalized', ?, ?, ?, ?)", [.integer(tripID), .integer(now), .integer(session.vehicleID), effective, .text(disposition), reason.map(Binding.text) ?? .null])
+      try run("DELETE FROM tracking_session WHERE id = 1", [])
     }
   }
 
@@ -911,6 +977,17 @@ public final class LocalStore: @unchecked Sendable {
     defer { sqlite3_finalize(statement) }
     guard sqlite3_step(statement) == SQLITE_ROW, let source = sqlite3_column_text(statement, 0) else { return nil }
     return String(cString: source)
+  }
+
+  private func failureReason(_ failure: TrackingFailure?) -> String? {
+    switch failure {
+    case .movementNotConfirmed: return "movement_not_confirmed"
+    case .locationPermissionLost: return "location_permission_lost"
+    case .locationFailed: return "location_failed"
+    case .restorationFailed: return "restoration_failed"
+    case .maximumDurationExceeded: return "maximum_duration_exceeded"
+    case .routeNotCorroborated, .unknownRoute, .conflictingRoute, nil: return nil
+    }
   }
 
   private func photoAssets() throws -> [(id: Int64, filename: String)] {
