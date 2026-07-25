@@ -40,6 +40,24 @@ Do not substitute unversioned Expo documentation.
 The generated `ios/` and `android/` directories are not source of truth. Express native
 configuration through Expo configuration and config plugins where practical.
 
+## iOS visual design
+
+The TorqueLog iOS beta-flow artifact is the visual and interaction reference for MVP product UI:
+[`docs/design/TorqueLog iOS Beta Flows (standalone).html`](docs/design/TorqueLog%20iOS%20Beta%20Flows%20(standalone).html).
+Read the relevant flow screens before changing a user-facing iOS screen. Preserve their hierarchy,
+copy, states, navigation, accessibility annotations, and interaction intent unless the owning issue
+explicitly approves a deviation.
+
+Prioritize native iOS design over generic cross-platform layouts. Use the platform's system
+typography, SF Symbols, grouped surfaces, sheets, toolbar conventions, bottom-tab behavior, and
+dynamic-type reflow. Where the installed iOS version and Expo SDK 57 APIs support it, use Liquid
+Glass and native glass effects deliberately for navigation and transient controls; do not imitate
+glass with arbitrary blur, gradients, or web-style cards. Keep controls legible, accessible, and
+functional when Reduce Transparency or larger Dynamic Type is enabled.
+
+Before declaring a visual implementation complete, verify it against the artifact on an iOS
+development build and record any intentional divergence in the owning issue.
+
 ## Work boundaries
 
 - Use one issue per implementation branch unless the issue explicitly groups inseparable work.
