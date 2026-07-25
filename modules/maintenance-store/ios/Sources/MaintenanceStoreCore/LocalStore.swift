@@ -94,6 +94,16 @@ public struct StoreBootstrap: Sendable, Equatable {
   public let schemaVersion: Int
 }
 
+public struct StoredTrackingSetup: Sendable, Equatable {
+  public let vehicleId: Int64
+  public let state: String
+  public let locationReady: Bool
+  public let automationsReady: Bool
+  public let routeReady: Bool
+  public let checklistReady: Bool
+  public let testReady: Bool
+}
+
 /// The only owner of SQLite connections and durable product writes.
 public final class LocalStore: @unchecked Sendable {
   public static let currentSchemaVersion = 2
@@ -471,7 +481,99 @@ public final class LocalStore: @unchecked Sendable {
     }
   }
 
-  public func startTracking(vehicleId: Int64, source: String, now: Int64) throws {
+  public func trackingSetup(for vehicleId: Int64, locationReady: Bool = false) throws -> StoredTrackingSetup {
+    guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
+      throw LocalStoreError.invalidVehicle
+    }
+    let configuration = try queryOne(
+      "SELECT setup_completed_at IS NOT NULL, tested_at IS NOT NULL FROM trigger_configuration WHERE vehicle_id = ?",
+      [.integer(vehicleId)]
+    )
+    let automationsReady = configuration?[0] == 1
+    let testReady = configuration?[1] == 1
+    let routeReady = try queryOne("SELECT id FROM route_binding WHERE vehicle_id = ?", [.integer(vehicleId)]) != nil
+    let checklistReady = automationsReady && routeReady
+    let isReady = locationReady && automationsReady && routeReady && checklistReady && testReady
+    return StoredTrackingSetup(
+      vehicleId: vehicleId,
+      state: isReady ? "ready" : "incomplete",
+      locationReady: locationReady,
+      automationsReady: automationsReady,
+      routeReady: routeReady,
+      checklistReady: checklistReady,
+      testReady: testReady
+    )
+  }
+
+  public func shortcutVehicles() throws -> [StoredVehicle] {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, "SELECT id, nickname, year, make, model FROM vehicle WHERE archived_at IS NULL ORDER BY nickname COLLATE NOCASE, id", -1, &statement, nil) == SQLITE_OK, let statement else {
+      throw failure(database)
+    }
+    defer { sqlite3_finalize(statement) }
+    var vehicles: [StoredVehicle] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      guard let nickname = sqlite3_column_text(statement, 1), let make = sqlite3_column_text(statement, 3), let model = sqlite3_column_text(statement, 4) else {
+        throw LocalStoreError.sqlite("Vehicle row was missing required text")
+      }
+      vehicles.append(StoredVehicle(id: sqlite3_column_int64(statement, 0), nickname: String(cString: nickname), year: Int(sqlite3_column_int64(statement, 2)), make: String(cString: make), model: String(cString: model)))
+    }
+    return vehicles
+  }
+
+  /// Records the owner's completed Shortcuts checklist; the Shortcut itself remains a user-owned iOS automation.
+  public func configureShortcut(for vehicleId: Int64, mode: String, now: Int64) throws {
+    guard ["bluetooth_shortcut", "wired_carplay_shortcut"].contains(mode) else {
+      throw LocalStoreError.invalidVehicle
+    }
+    try transaction {
+      guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
+        throw LocalStoreError.invalidVehicle
+      }
+      if mode == "wired_carplay_shortcut",
+         try queryOne("SELECT id FROM trigger_configuration WHERE mode = ? AND vehicle_id <> ?", [.text(mode), .integer(vehicleId)]) != nil {
+        throw LocalStoreError.trackingConflict
+      }
+      try run(
+        "INSERT INTO trigger_configuration (vehicle_id, mode, setup_completed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(vehicle_id, mode) DO UPDATE SET setup_completed_at = excluded.setup_completed_at, updated_at = excluded.updated_at",
+        [.integer(vehicleId), .text(mode), .integer(now), .integer(now), .integer(now)]
+      )
+    }
+  }
+
+  /// Route fingerprints are observed by native adapters and intentionally never cross the React Native bridge.
+  public func recordRouteObservation(for vehicleId: Int64, kind: String, opaqueValue: String, now: Int64) throws {
+    guard ["bluetooth_route", "carplay_route"].contains(kind), !opaqueValue.isEmpty else {
+      throw LocalStoreError.invalidVehicle
+    }
+    try transaction {
+      guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
+        throw LocalStoreError.invalidVehicle
+      }
+      if let owner = try queryOne("SELECT vehicle_id FROM route_binding WHERE kind = ? AND opaque_value = ?", [.text(kind), .text(opaqueValue)]), owner[0] != vehicleId {
+        throw LocalStoreError.trackingConflict
+      }
+      try run(
+        "INSERT INTO route_binding (vehicle_id, kind, opaque_value, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(kind, opaque_value) DO NOTHING",
+        [.integer(vehicleId), .text(kind), .text(opaqueValue), .integer(now)]
+      )
+    }
+  }
+
+  public func recordShortcutTest(for vehicleId: Int64, now: Int64) throws {
+    try transaction {
+      guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
+        throw LocalStoreError.invalidVehicle
+      }
+      guard try queryOne("SELECT id FROM trigger_configuration WHERE vehicle_id = ?", [.integer(vehicleId)]) != nil else {
+        throw LocalStoreError.trackingConflict
+      }
+      try run("UPDATE trigger_configuration SET tested_at = ?, updated_at = ? WHERE vehicle_id = ?", [.integer(now), .integer(now), .integer(vehicleId)])
+    }
+  }
+
+  public func startTracking(vehicleId: Int64, source: String, now: Int64, automaticSetupReady: Bool = false) throws {
     guard source == "manual" || source == "automatic" else {
       throw LocalStoreError.sqlite("Unsupported tracking source")
     }
@@ -479,6 +581,9 @@ public final class LocalStore: @unchecked Sendable {
       try requireAcceptedDisclosure()
       guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
         throw LocalStoreError.sqlite("Vehicle is unavailable")
+      }
+      if source == "automatic", !automaticSetupReady {
+        throw LocalStoreError.trackingConflict
       }
       if let activeVehicleId = try queryOne("SELECT intended_vehicle_id FROM tracking_session WHERE id = 1", [])?[0] {
         guard activeVehicleId == vehicleId else { throw LocalStoreError.trackingConflict }
@@ -498,10 +603,12 @@ public final class LocalStore: @unchecked Sendable {
   public func stopTracking(now: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)) throws {
     try transaction {
       guard let session = try queryOne("SELECT intended_vehicle_id, started_at, movement_observed, cumulative_milli_miles FROM tracking_session WHERE id = 1", []) else { return }
+      let source = try trackingSessionSource() ?? "manual"
       let hasUsableDistance = session[2] == 1 && session[3] > 0
+      let routeCorroboration = source == "automatic" ? (try queryOne("SELECT corroboration_observed FROM tracking_session WHERE id = 1", [])?[0] == 1 ? "matched" : "not_observed") : "not_required"
       let tripId = try insert(
-        "INSERT INTO trip (source, proposed_vehicle_id, started_at, ended_at, captured_milli_miles, movement_outcome, normal_completion_outcome, route_corroboration_outcome, quality_counters_json, failure_reason) VALUES ('manual', ?, ?, ?, ?, ?, 'explicit_end', 'not_required', '{}', ?)",
-        [.integer(session[0]), .integer(session[1]), .integer(now), hasUsableDistance ? .integer(session[3]) : .null, .text(hasUsableDistance ? "confirmed" : "not_confirmed"), hasUsableDistance ? .null : .text("movement_not_confirmed")]
+        "INSERT INTO trip (source, proposed_vehicle_id, started_at, ended_at, captured_milli_miles, movement_outcome, normal_completion_outcome, route_corroboration_outcome, quality_counters_json, failure_reason) VALUES (?, ?, ?, ?, ?, ?, 'explicit_end', ?, '{}', ?)",
+        [.text(source), .integer(session[0]), .integer(session[1]), .integer(now), hasUsableDistance ? .integer(session[3]) : .null, .text(hasUsableDistance ? "confirmed" : "not_confirmed"), .text(routeCorroboration), hasUsableDistance ? .null : .text("movement_not_confirmed")]
       )
       try run("INSERT INTO trip_state (trip_id, vehicle_id, effective_milli_miles, disposition, updated_at) VALUES (?, ?, ?, ?, ?)", [.integer(tripId), .integer(session[0]), hasUsableDistance ? .integer(session[3]) : .null, .text(hasUsableDistance ? "confirmed" : "review_required"), .integer(now)])
       try run("INSERT INTO trip_revision (trip_id, revision_number, occurred_at, actor, action, vehicle_id, effective_milli_miles, disposition) VALUES (?, 1, ?, 'system', 'finalized', ?, ?, ?)", [.integer(tripId), .integer(now), .integer(session[0]), hasUsableDistance ? .integer(session[3]) : .null, .text(hasUsableDistance ? "confirmed" : "review_required")])
@@ -793,6 +900,17 @@ public final class LocalStore: @unchecked Sendable {
         disposition: String(cString: disposition), failureReason: sqlite3_column_type(statement, 7) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(statement, 7)!)))
     }
     return trips
+  }
+
+  private func trackingSessionSource() throws -> String? {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, "SELECT source FROM tracking_session WHERE id = 1", -1, &statement, nil) == SQLITE_OK, let statement else {
+      throw failure(database)
+    }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW, let source = sqlite3_column_text(statement, 0) else { return nil }
+    return String(cString: source)
   }
 
   private func photoAssets() throws -> [(id: Int64, filename: String)] {

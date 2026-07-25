@@ -9,7 +9,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ScheduleManager } from '@/features/schedules/schedule-manager';
 import { Spacing, TorqueColors } from '@/constants/theme';
-import { maintenanceStore, type GarageVehicle, type ManualOdometerReading } from '../../modules/maintenance-store';
+import { maintenanceStore, type GarageVehicle, type ManualOdometerReading, type TrackingSetup } from '../../modules/maintenance-store';
 
 type Draft = Readonly<{ nickname: string; year: string; make: string; model: string; odometer: string }>;
 const emptyDraft: Draft = { nickname: '', year: '', make: '', model: '', odometer: '' };
@@ -158,6 +158,7 @@ function VehicleEditor({ vehicle, onCancel, onChanged, openScheduleId }: Readonl
   return <ThemedView style={styles.screen}><SafeAreaView style={styles.safeArea}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
     <View style={styles.formNavigation}><Pressable accessibilityRole="button" onPress={onCancel}><ThemedText style={styles.navigationAction}>Cancel</ThemedText></Pressable><ThemedText accessibilityRole="header" style={styles.formTitle}>Vehicle profile</ThemedText><Pressable accessibilityRole="button" disabled={!valid || saving} onPress={save}><ThemedText style={[styles.navigationAction, (!valid || saving) && styles.disabled]}>Save</ThemedText></Pressable></View>
     <ThemedText style={styles.formIntro}>Identity fields can be changed here. Odometer readings remain an auditable history and are updated separately.</ThemedText>
+    <TrackingSetupStatus vehicleId={vehicle.id} />
     <Pressable accessibilityRole="button" accessibilityLabel="Hero photo" accessibilityHint="Opens photo options" onPress={photoOptions} style={styles.photoPanel}>{vehicle.heroPhotoUri ? <Image source={{ uri: vehicle.heroPhotoUri }} style={styles.photoPreview} accessibilityLabel={`${vehicle.nickname} hero photo`} /> : <SymbolView name={{ ios: 'photo.badge.plus', android: 'add_a_photo', web: 'image' }} tintColor={TorqueColors.primary} size={28} />}<ThemedText style={styles.photoTitle}>{vehicle.heroPhotoUri ? 'Hero photo' : 'Add a hero photo'}</ThemedText></Pressable>
     <View style={styles.fieldGroup}><Field label="Nickname" value={draft.nickname} onChangeText={(nickname) => setDraft({ ...draft, nickname })} /><Field label="Year" value={draft.year} onChangeText={(year) => setDraft({ ...draft, year })} keyboardType="number-pad" /><Field label="Make" value={draft.make} onChangeText={(make) => setDraft({ ...draft, make })} /><Field label="Model" value={draft.model} onChangeText={(model) => setDraft({ ...draft, model })} /></View>
     <OdometerReadingManager vehicle={vehicle} onChanged={onChanged} />
@@ -165,6 +166,35 @@ function VehicleEditor({ vehicle, onCancel, onChanged, openScheduleId }: Readonl
     {error && <ThemedText style={styles.error} accessibilityLiveRegion="polite">{error}</ThemedText>}
     <ActionButton label="Archive vehicle" onPress={archive} />
   </ScrollView></SafeAreaView></ThemedView>;
+}
+
+function TrackingSetupStatus({ vehicleId }: Readonly<{ vehicleId: string }>) {
+  const [setup, setSetup] = useState<TrackingSetup | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useEffectEvent(() => {
+    setError(null);
+    maintenanceStore.tracking.getSetup(vehicleId).then(setSetup).catch((reason: unknown) => {
+      setError(reason instanceof Error && reason.message.includes('Rebuild the iOS development client') ? reason.message : 'Automatic tracking setup could not be checked.');
+    });
+  });
+  useEffect(() => {
+    const task = setTimeout(load, 0);
+    return () => clearTimeout(task);
+  }, [vehicleId]);
+  if (error) return <ThemedText accessibilityLiveRegion="polite" style={styles.error}>{error}</ThemedText>;
+  if (!setup) return <ThemedText style={styles.formIntro}>Checking automatic tracking setup...</ThemedText>;
+  const requirements = [
+    [setup.locationReady, 'Precise Always Location'],
+    [setup.automationsReady, 'Start and End Trip Shortcuts with Run Immediately'],
+    [setup.routeReady, 'Supported route observation'],
+    [setup.testReady, 'In-app Shortcut test'],
+  ] as const;
+  return <View accessibilityLiveRegion="polite" style={styles.trackingPanel}>
+    <ThemedText accessibilityRole="header" style={styles.trackingTitle}>{setup.state === 'ready' ? 'Automatic tracking ready' : 'Automatic tracking off'}</ThemedText>
+    <ThemedText style={styles.trackingCopy}>{setup.state === 'ready' ? 'This vehicle can receive its selected Shortcut. Review every captured trip before it affects the estimate.' : 'Setup is incomplete, so no trip will start on its own. You can still start a trip manually and add odometer readings.'}</ThemedText>
+    {requirements.map(([ready, label]) => <ThemedText key={label} style={styles.trackingRequirement}>{ready ? 'Complete' : 'Required'}: {label}</ThemedText>)}
+    {setup.state === 'incomplete' ? <ThemedText style={styles.trackingCopy}>In Shortcuts, add Start Trip and End Trip, select this vehicle, then create your selected Bluetooth or CarPlay automations and choose Run Immediately. A route observation and in-app test complete setup.</ThemedText> : null}
+  </View>;
 }
 
 function OdometerReadingManager({ vehicle, onChanged }: Readonly<{ vehicle: GarageVehicle; onChanged: () => void }>) {
@@ -284,4 +314,5 @@ const styles = StyleSheet.create({
   vehicleCard: { borderRadius: 18, overflow: 'hidden', backgroundColor: TorqueColors.card }, vehicleHero: { height: 150, backgroundColor: '#E8F2FC', alignItems: 'center', justifyContent: 'center' }, vehicleDetails: { padding: Spacing.three, gap: Spacing.half }, vehicleName: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, vehicleModel: { color: TorqueColors.text, fontSize: 16 }, vehicleMileage: { color: TorqueColors.secondary, fontSize: 13 }, sectionTitle: { color: TorqueColors.text, fontSize: 20, fontWeight: '700', marginTop: Spacing.two }, archivedCard: { borderRadius: 16, backgroundColor: TorqueColors.card, padding: Spacing.three, gap: Spacing.two }, archivedDetails: { gap: Spacing.half }, readOnlyRow: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, padding: Spacing.three, gap: Spacing.one, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, odometerSection: { gap: Spacing.two }, historyTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700', marginTop: Spacing.one }, historyRow: { borderRadius: Spacing.two, backgroundColor: TorqueColors.card, padding: Spacing.two, flexDirection: 'row', justifyContent: 'space-between' },
   formNavigation: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, formTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700' }, navigationAction: { color: TorqueColors.primary, fontSize: 17 }, photoPanel: { minHeight: 132, borderRadius: Spacing.three, borderWidth: 1, borderColor: TorqueColors.divider, backgroundColor: TorqueColors.card, alignItems: 'center', justifyContent: 'center', gap: Spacing.one, overflow: 'hidden' }, photoPreview: { width: '100%', height: 132 }, photoTitle: { color: TorqueColors.primary, fontSize: 16, fontWeight: '600' }, photoDetail: { color: TorqueColors.secondary, fontSize: 13 }, formIntro: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 }, fieldGroup: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, paddingHorizontal: Spacing.three }, field: { gap: Spacing.one, paddingVertical: Spacing.two, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider }, fieldLabel: { color: TorqueColors.text, fontSize: 13, fontWeight: '600' },
   input: { minHeight: 30, paddingVertical: Spacing.one, fontSize: 17, color: TorqueColors.text }, action: { minHeight: 48, borderRadius: 12, backgroundColor: TorqueColors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.three }, actionText: { color: '#FFFFFF', fontWeight: '700' }, error: { color: TorqueColors.error }, disabled: { opacity: 0.45 },
+  trackingPanel: { borderRadius: Spacing.three, backgroundColor: '#F2F2F7', borderWidth: StyleSheet.hairlineWidth, borderColor: TorqueColors.divider, padding: Spacing.three, gap: Spacing.one }, trackingTitle: { color: TorqueColors.text, fontSize: 16, fontWeight: '700' }, trackingCopy: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 }, trackingRequirement: { color: TorqueColors.text, fontSize: 13 },
 });

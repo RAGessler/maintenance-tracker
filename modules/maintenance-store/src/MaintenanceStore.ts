@@ -113,6 +113,16 @@ export type TrackingSnapshot = Readonly<{
   state: 'idle' | 'tracking' | 'recovering';
 }>;
 
+export type TrackingSetup = Readonly<{
+  vehicleId: string;
+  state: 'incomplete' | 'ready';
+  locationReady: boolean;
+  automationsReady: boolean;
+  routeReady: boolean;
+  checklistReady: boolean;
+  testReady: boolean;
+}>;
+
 export type Trip = Readonly<{
   id: string;
   vehicleId?: string;
@@ -155,6 +165,7 @@ export interface NativeMaintenanceStore {
     initialOdometerMilliMiles: string,
   ): Promise<Vehicle>;
   getTrackingSnapshot(): Promise<TrackingSnapshot>;
+  getTrackingSetup?(vehicleId: string): Promise<TrackingSetup>;
   startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
   stopTracking(): Promise<TrackingSnapshot>;
   getTrips?(vehicleId: string): Promise<Trip[]>;
@@ -208,6 +219,7 @@ export type MaintenanceStore = Readonly<{
   }>;
   tracking: Readonly<{
     getSnapshot(): Promise<TrackingSnapshot>;
+    getSetup(vehicleId: string): Promise<TrackingSetup>;
     start(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
     stop(): Promise<TrackingSnapshot>;
     getTrips(vehicleId: string): Promise<Trip[]>;
@@ -310,6 +322,10 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
     },
     tracking: {
       getSnapshot: () => native.getTrackingSnapshot(),
+      getSetup: (vehicleId) => {
+        if (typeof native.getTrackingSetup !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage automatic tracking setup.'));
+        return native.getTrackingSetup(vehicleId);
+      },
       start: (vehicleId, source) => native.startTracking(vehicleId, source),
       stop: () => native.stopTracking(),
       getTrips: (vehicleId) => {

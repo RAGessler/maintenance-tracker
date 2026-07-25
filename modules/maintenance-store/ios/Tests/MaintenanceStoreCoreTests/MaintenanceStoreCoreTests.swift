@@ -227,6 +227,68 @@ func archivesAndRestoresVehicleSafely() throws {
   #expect(try scalar(database, "SELECT COUNT(*) FROM trigger_configuration WHERE vehicle_id = \(vehicle.id)") == 0)
 }
 
+@Test("tracking setup reports only readiness facts and never route identifiers")
+func reportsTrackingSetupWithoutRouteIdentifiers() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+
+  let setup = try store.trackingSetup(for: vehicle.id)
+  #expect(setup.vehicleId == vehicle.id)
+  #expect(setup.automationsReady == false)
+  #expect(setup.routeReady == false)
+  #expect(setup.checklistReady == false)
+  #expect(setup.testReady == false)
+}
+
+@Test("tracking setup requires a tested shortcut and exclusively owned route observation")
+func requiresTestedShortcutAndExclusiveRouteObservation() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let daily = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+  let weekend = try store.createVehicle(nickname: "Weekend", year: 2021, make: "Mazda", model: "MX-5", initialOdometerMilliMiles: 0, now: 3)
+
+  try store.configureShortcut(for: daily.id, mode: "wired_carplay_shortcut", now: 4)
+  try store.recordRouteObservation(for: daily.id, kind: "carplay_route", opaqueValue: "carplay-route", now: 5)
+  let incomplete = try store.trackingSetup(for: daily.id, locationReady: true)
+
+  #expect(incomplete.state == "incomplete")
+  #expect(incomplete.automationsReady == true)
+  #expect(incomplete.routeReady == true)
+  #expect(incomplete.checklistReady == true)
+  #expect(incomplete.testReady == false)
+  #expect(throws: LocalStoreError.trackingConflict) {
+    try store.configureShortcut(for: weekend.id, mode: "wired_carplay_shortcut", now: 6)
+  }
+  #expect(throws: LocalStoreError.trackingConflict) {
+    try store.recordRouteObservation(for: weekend.id, kind: "carplay_route", opaqueValue: "carplay-route", now: 6)
+  }
+
+  try store.recordShortcutTest(for: daily.id, now: 7)
+  #expect(try store.trackingSetup(for: daily.id, locationReady: true).state == "ready")
+  #expect(throws: LocalStoreError.trackingConflict) {
+    try store.startTracking(vehicleId: weekend.id, source: "automatic", now: 8)
+  }
+}
+
+@Test("automatic sessions retain Shortcut attribution and route-observation outcome")
+func retainsAutomaticTripAttribution() throws {
+  let directoryURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+  try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+
+  try store.startTracking(vehicleId: vehicle.id, source: "automatic", now: 3, automaticSetupReady: true)
+  try store.stopTracking(now: 4)
+
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+  #expect(try scalar(database, "SELECT source = 'automatic' AND route_corroboration_outcome = 'not_observed' FROM trip") == 1)
+}
+
 @Test("archiving an actively tracked vehicle is blocked")
 func blocksArchiveDuringActiveTrip() throws {
   let store = try LocalStore(path: ":memory:")
