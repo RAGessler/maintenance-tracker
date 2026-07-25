@@ -251,6 +251,7 @@ public final class LocalStore: @unchecked Sendable {
     defer { Self.writeLock.unlock() }
 
     let fileManager = FileManager.default
+    guard fileManager.fileExists(atPath: directoryURL.path) else { return }
     let missingAssetIDs = try photoAssets().compactMap { asset in
       guard let url = photoFileURL(for: asset.filename, in: directoryURL),
             fileManager.fileExists(atPath: url.path) else {
@@ -263,8 +264,6 @@ public final class LocalStore: @unchecked Sendable {
         try run("DELETE FROM photo_asset WHERE id = ?", [.integer(id)])
       }
     }
-    guard fileManager.fileExists(atPath: directoryURL.path) else { return }
-
     let referencedFilenames = Set(try photoAssets().map(\.filename))
     for fileURL in try fileManager.contentsOfDirectory(
       at: directoryURL,

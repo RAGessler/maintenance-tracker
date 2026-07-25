@@ -270,6 +270,10 @@ func reconcilesPhotoFiles() throws {
   #expect(!FileManager.default.fileExists(atPath: photosURL.appendingPathComponent("stale.tmp").path))
   #expect(!FileManager.default.fileExists(atPath: photosURL.appendingPathComponent("unreferenced.jpg").path))
   #expect(try scalar(database, "SELECT COUNT(*) FROM photo_asset") == 1)
+
+  try FileManager.default.removeItem(at: photosURL)
+  try store.reconcilePhotoFiles(in: photosURL)
+  #expect(try scalar(database, "SELECT COUNT(*) FROM photo_asset") == 1)
 }
 
 @Test("representative garage and odometer reads use their approved indexes")
