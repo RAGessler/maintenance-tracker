@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, AppState, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -27,11 +27,12 @@ export default function ActivityScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const loadVersion = useRef(0);
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
     try {
-      setError(null);
       const loadedVehicles = await maintenanceStore.product.getVehicles();
       const [nextSnapshot, facts] = await Promise.all([
         maintenanceStore.tracking.getSnapshot(),
@@ -39,6 +40,8 @@ export default function ActivityScreen() {
           maintenanceStore.tracking.getTrips(vehicle.id), maintenanceStore.product.getMaintenanceRecords(vehicle.id), maintenanceStore.product.getManualOdometerReadings(vehicle.id),
         ]))),
       ]);
+      if (version !== loadVersion.current) return;
+      setError(null);
       setVehicles(loadedVehicles);
       setSelectedVehicleId((current) => current && loadedVehicles.some((vehicle) => vehicle.id === current) ? current : loadedVehicles[0]?.id);
       setHistoryVehicleId((current) => current && loadedVehicles.some((vehicle) => vehicle.id === current) ? current : undefined);
@@ -47,13 +50,20 @@ export default function ActivityScreen() {
       setRecords(facts.flatMap(([, vehicleRecords]) => vehicleRecords));
       setReadings(facts.flatMap(([, , vehicleReadings]) => vehicleReadings));
     } catch (loadError: unknown) {
+      if (version !== loadVersion.current) return;
       setError(loadError instanceof Error && loadError.message.startsWith('Rebuild the iOS development client') ? loadError.message : 'Activity could not be loaded. Try again.');
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void load();
+    });
+    return () => subscription.remove();
+  }, [load]);
 
   const commandTracking = async () => {
     if (!selectedVehicleId || saving) return;
