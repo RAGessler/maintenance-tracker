@@ -4,6 +4,7 @@ import SQLite3
 public enum LocalStoreError: Error, Equatable {
   case invalidVehicle
   case invalidMaintenanceRecord
+  case invalidMaintenanceSchedule
   case invalidPhoto
   case disclosureRequired
   case trackingConflict
@@ -45,6 +46,18 @@ public struct StoredMaintenanceRecord: Sendable, Equatable {
   public let note: String?
 }
 
+public struct StoredMaintenanceSchedule: Sendable, Equatable {
+  public let id: Int64
+  public let vehicleId: Int64
+  public let serviceName: String
+  public let sourceTemplateKey: String?
+  public let sourceTemplateVersion: Int?
+  public let mileageIntervalMilliMiles: Int64?
+  public let dayInterval: Int?
+  public let baselineDate: String
+  public let baselineMilliMiles: Int64
+}
+
 public struct StoreBootstrap: Sendable, Equatable {
   public let disclosureAccepted: Bool
   public let disclosureVersion: Int
@@ -53,7 +66,7 @@ public struct StoreBootstrap: Sendable, Equatable {
 
 /// The only owner of SQLite connections and durable product writes.
 public final class LocalStore: @unchecked Sendable {
-  public static let currentSchemaVersion = 1
+  public static let currentSchemaVersion = 2
 
   private var database: OpaquePointer?
   private static let writeLock = NSLock()
@@ -215,6 +228,59 @@ public final class LocalStore: @unchecked Sendable {
     try transaction {
       guard try queryOne("SELECT id FROM maintenance_record WHERE id = ?", [.integer(id)]) != nil else { throw LocalStoreError.invalidMaintenanceRecord }
       try run("DELETE FROM maintenance_record WHERE id = ?", [.integer(id)])
+    }
+  }
+
+  public func maintenanceSchedules(for vehicleId: Int64) throws -> [StoredMaintenanceSchedule] {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    let sql = "SELECT id, vehicle_id, service_name, source_template_key, source_template_version, mileage_interval, day_interval, initial_baseline_date, initial_baseline_milli_miles FROM maintenance_schedule WHERE vehicle_id = ? ORDER BY service_name COLLATE NOCASE, id"
+    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw failure(database) }
+    defer { sqlite3_finalize(statement) }
+    try bind([.integer(vehicleId)], to: statement)
+    var schedules: [StoredMaintenanceSchedule] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      guard let serviceName = sqlite3_column_text(statement, 2), let baselineDate = sqlite3_column_text(statement, 7) else { throw LocalStoreError.sqlite("Maintenance schedule was missing required text") }
+      schedules.append(StoredMaintenanceSchedule(
+        id: sqlite3_column_int64(statement, 0), vehicleId: sqlite3_column_int64(statement, 1), serviceName: String(cString: serviceName),
+        sourceTemplateKey: sqlite3_column_type(statement, 3) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(statement, 3)!),
+        sourceTemplateVersion: sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 4)),
+        mileageIntervalMilliMiles: sqlite3_column_type(statement, 5) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 5),
+        dayInterval: sqlite3_column_type(statement, 6) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 6)),
+        baselineDate: String(cString: baselineDate), baselineMilliMiles: sqlite3_column_int64(statement, 8)
+      ))
+    }
+    return schedules
+  }
+
+  public func createMaintenanceSchedule(vehicleId: Int64, serviceName: String, sourceTemplateKey: String?, sourceTemplateVersion: Int?, mileageIntervalMilliMiles: Int64?, dayInterval: Int?, baselineDate: String, baselineMilliMiles: Int64, now: Int64) throws -> StoredMaintenanceSchedule {
+    try validateSchedule(serviceName: serviceName, mileageIntervalMilliMiles: mileageIntervalMilliMiles, dayInterval: dayInterval, baselineDate: baselineDate, baselineMilliMiles: baselineMilliMiles)
+    var scheduleId: Int64 = 0
+    try transaction {
+      try requireAcceptedDisclosure()
+      guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else { throw LocalStoreError.invalidMaintenanceSchedule }
+      scheduleId = try insert("INSERT INTO maintenance_schedule (vehicle_id, service_name, source_template_key, source_template_version, mileage_interval, day_interval, initial_baseline_date, initial_baseline_milli_miles, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [.integer(vehicleId), .text(serviceName.trimmingCharacters(in: .whitespacesAndNewlines)), sourceTemplateKey.map(Binding.text) ?? .null, sourceTemplateVersion.map { .integer(Int64($0)) } ?? .null, mileageIntervalMilliMiles.map(Binding.integer) ?? .null, dayInterval.map { .integer(Int64($0)) } ?? .null, .text(baselineDate), .integer(baselineMilliMiles), .integer(now), .integer(now)])
+    }
+    guard let schedule = try maintenanceSchedules(for: vehicleId).first(where: { $0.id == scheduleId }) else { throw LocalStoreError.sqlite("Maintenance schedule transaction did not return an identifier") }
+    return schedule
+  }
+
+  public func updateMaintenanceSchedule(id: Int64, serviceName: String, mileageIntervalMilliMiles: Int64?, dayInterval: Int?, baselineDate: String, baselineMilliMiles: Int64, now: Int64) throws -> StoredMaintenanceSchedule {
+    try validateSchedule(serviceName: serviceName, mileageIntervalMilliMiles: mileageIntervalMilliMiles, dayInterval: dayInterval, baselineDate: baselineDate, baselineMilliMiles: baselineMilliMiles)
+    var vehicleId: Int64 = 0
+    try transaction {
+      guard let row = try queryOne("SELECT vehicle_id FROM maintenance_schedule WHERE id = ?", [.integer(id)]) else { throw LocalStoreError.invalidMaintenanceSchedule }
+      vehicleId = row[0]
+      try run("UPDATE maintenance_schedule SET service_name = ?, mileage_interval = ?, day_interval = ?, initial_baseline_date = ?, initial_baseline_milli_miles = ?, updated_at = ? WHERE id = ?", [.text(serviceName.trimmingCharacters(in: .whitespacesAndNewlines)), mileageIntervalMilliMiles.map(Binding.integer) ?? .null, dayInterval.map { .integer(Int64($0)) } ?? .null, .text(baselineDate), .integer(baselineMilliMiles), .integer(now), .integer(id)])
+    }
+    guard let schedule = try maintenanceSchedules(for: vehicleId).first(where: { $0.id == id }) else { throw LocalStoreError.sqlite("Maintenance schedule disappeared after update") }
+    return schedule
+  }
+
+  public func deleteMaintenanceSchedule(id: Int64) throws {
+    try transaction {
+      guard try queryOne("SELECT id FROM maintenance_schedule WHERE id = ?", [.integer(id)]) != nil else { throw LocalStoreError.invalidMaintenanceSchedule }
+      try run("DELETE FROM maintenance_schedule WHERE id = ?", [.integer(id)])
     }
   }
 
@@ -463,8 +529,12 @@ public final class LocalStore: @unchecked Sendable {
       if version == 0 {
         try execute(schemaV1)
         try execute("PRAGMA user_version = 1")
-        try validateForeignKeys()
       }
+      if version <= 1 {
+        try execute("ALTER TABLE maintenance_schedule ADD COLUMN source_template_version INTEGER CHECK(source_template_version > 0)")
+        try execute("PRAGMA user_version = 2")
+      }
+      try validateForeignKeys()
     }
   }
 
@@ -488,6 +558,14 @@ public final class LocalStore: @unchecked Sendable {
     return (normalizedNickname, normalizedMake, normalizedModel)
   }
 
+  private func validateSchedule(serviceName: String, mileageIntervalMilliMiles: Int64?, dayInterval: Int?, baselineDate: String, baselineMilliMiles: Int64) throws {
+    guard !serviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+          mileageIntervalMilliMiles.map({ $0 > 0 }) ?? true,
+          dayInterval.map({ $0 > 0 }) ?? true,
+          mileageIntervalMilliMiles != nil || dayInterval != nil,
+          validCivilDate(baselineDate), baselineMilliMiles >= 0 else { throw LocalStoreError.invalidMaintenanceSchedule }
+  }
+
   private func transactionLocked(_ body: () throws -> Void) throws {
     try execute("BEGIN IMMEDIATE")
     do {
@@ -500,6 +578,7 @@ public final class LocalStore: @unchecked Sendable {
   }
 
   private enum Binding {
+    case null
     case integer(Int64)
     case text(String)
   }
@@ -606,6 +685,7 @@ public final class LocalStore: @unchecked Sendable {
       let index = Int32(offset + 1)
       let result: Int32
       switch value {
+      case .null: result = sqlite3_bind_null(statement, index)
       case .integer(let integer): result = sqlite3_bind_int64(statement, index, integer)
       case .text(let text): result = sqlite3_bind_text(statement, index, text, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
       }

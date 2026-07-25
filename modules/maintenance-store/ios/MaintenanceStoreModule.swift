@@ -142,6 +142,28 @@ public class MaintenanceStoreModule: Module {
       try self.localStore().deleteMaintenanceRecord(id: nativeRecordId)
     }
 
+    AsyncFunction("getMaintenanceSchedules") { (vehicleId: String) throws -> [[String: Any]] in
+      guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidMaintenanceSchedule }
+      return try self.localStore().maintenanceSchedules(for: nativeVehicleId).map(Self.maintenanceScheduleDictionary)
+    }
+
+    AsyncFunction("createMaintenanceSchedule") { (vehicleId: String, serviceName: String, sourceTemplateKey: String?, sourceTemplateVersion: Int?, mileageIntervalMilliMiles: String?, dayInterval: Int?, baselineDate: String, baselineMilliMiles: String) throws -> [String: Any] in
+      guard let nativeVehicleId = Int64(vehicleId), let nativeBaselineMilliMiles = Int64(baselineMilliMiles), nativeBaselineMilliMiles >= 0 else { throw LocalStoreError.invalidMaintenanceSchedule }
+      let nativeInterval = try Self.optionalMilliMiles(mileageIntervalMilliMiles)
+      return try Self.maintenanceScheduleDictionary(self.localStore().createMaintenanceSchedule(vehicleId: nativeVehicleId, serviceName: serviceName, sourceTemplateKey: sourceTemplateKey, sourceTemplateVersion: sourceTemplateVersion, mileageIntervalMilliMiles: nativeInterval, dayInterval: dayInterval, baselineDate: baselineDate, baselineMilliMiles: nativeBaselineMilliMiles, now: Self.now()))
+    }
+
+    AsyncFunction("updateMaintenanceSchedule") { (scheduleId: String, serviceName: String, mileageIntervalMilliMiles: String?, dayInterval: Int?, baselineDate: String, baselineMilliMiles: String) throws -> [String: Any] in
+      guard let nativeScheduleId = Int64(scheduleId), let nativeBaselineMilliMiles = Int64(baselineMilliMiles), nativeBaselineMilliMiles >= 0 else { throw LocalStoreError.invalidMaintenanceSchedule }
+      let nativeInterval = try Self.optionalMilliMiles(mileageIntervalMilliMiles)
+      return try Self.maintenanceScheduleDictionary(self.localStore().updateMaintenanceSchedule(id: nativeScheduleId, serviceName: serviceName, mileageIntervalMilliMiles: nativeInterval, dayInterval: dayInterval, baselineDate: baselineDate, baselineMilliMiles: nativeBaselineMilliMiles, now: Self.now()))
+    }
+
+    AsyncFunction("deleteMaintenanceSchedule") { (scheduleId: String) throws -> Void in
+      guard let nativeScheduleId = Int64(scheduleId) else { throw LocalStoreError.invalidMaintenanceSchedule }
+      try self.localStore().deleteMaintenanceSchedule(id: nativeScheduleId)
+    }
+
     AsyncFunction("getTrackingSnapshot") { () throws -> [String: String] in
       ["state": try self.localStore().trackingState()]
     }
@@ -269,6 +291,24 @@ public class MaintenanceStoreModule: Module {
     ]
     if let scheduleId = record.scheduleId { result["scheduleId"] = String(scheduleId) }
     if let note = record.note { result["note"] = note }
+    return result
+  }
+
+  private static func optionalMilliMiles(_ value: String?) throws -> Int64? {
+    guard let value, !value.isEmpty else { return nil }
+    guard let milliMiles = Int64(value), milliMiles > 0 else { throw LocalStoreError.invalidMaintenanceSchedule }
+    return milliMiles
+  }
+
+  private static func maintenanceScheduleDictionary(_ schedule: StoredMaintenanceSchedule) -> [String: Any] {
+    var result: [String: Any] = [
+      "id": String(schedule.id), "vehicleId": String(schedule.vehicleId), "serviceName": schedule.serviceName,
+      "baselineDate": schedule.baselineDate, "baselineMilliMiles": String(schedule.baselineMilliMiles),
+    ]
+    if let key = schedule.sourceTemplateKey { result["sourceTemplateKey"] = key }
+    if let version = schedule.sourceTemplateVersion { result["sourceTemplateVersion"] = version }
+    if let interval = schedule.mileageIntervalMilliMiles { result["mileageIntervalMilliMiles"] = String(interval) }
+    if let interval = schedule.dayInterval { result["dayInterval"] = interval }
     return result
   }
 }

@@ -260,7 +260,30 @@ func retainsMaintenanceRecordsAcrossRelaunch() throws {
   #expect(try reopenedStore.maintenanceRecords(for: vehicle.id).first?.milliMiles == 1_234_567)
 }
 
-@Test("the v1 schema accepts only approved durable trip codes")
+@Test("maintenance schedules retain copied template values and validate editable intervals")
+func managesMaintenanceSchedules() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 42_125_999, now: 2)
+  let schedule = try store.createMaintenanceSchedule(vehicleId: vehicle.id, serviceName: "Engine oil", sourceTemplateKey: "engine-oil", sourceTemplateVersion: 1, mileageIntervalMilliMiles: 5_000_000, dayInterval: 365, baselineDate: "2024-02-29", baselineMilliMiles: 42_125_999, now: 3)
+
+  #expect(schedule.sourceTemplateKey == "engine-oil")
+  #expect(schedule.sourceTemplateVersion == 1)
+  #expect(schedule.baselineMilliMiles == 42_125_999)
+  let edited = try store.updateMaintenanceSchedule(id: schedule.id, serviceName: "Oil change", mileageIntervalMilliMiles: nil, dayInterval: 180, baselineDate: "2024-03-01", baselineMilliMiles: 42_126_000, now: 4)
+  #expect(edited.serviceName == "Oil change")
+  #expect(edited.mileageIntervalMilliMiles == nil)
+  #expect(try store.maintenanceSchedules(for: vehicle.id).first?.dayInterval == 180)
+
+  #expect(throws: LocalStoreError.invalidMaintenanceSchedule) {
+    try store.createMaintenanceSchedule(vehicleId: vehicle.id, serviceName: "", sourceTemplateKey: nil, sourceTemplateVersion: nil, mileageIntervalMilliMiles: nil, dayInterval: nil, baselineDate: "2024-02-30", baselineMilliMiles: -1, now: 5)
+  }
+}
+
+@Test("the current schema accepts only approved durable trip codes")
 func constrainsPersistedTripCodes() throws {
   let directoryURL = FileManager.default.temporaryDirectory
     .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -269,7 +292,7 @@ func constrainsPersistedTripCodes() throws {
   defer { try? FileManager.default.removeItem(at: directoryURL) }
 
   let store = try LocalStore(path: databaseURL.path)
-  #expect(try store.schemaVersion() == 1)
+  #expect(try store.schemaVersion() == LocalStore.currentSchemaVersion)
 
   var database: OpaquePointer?
   #expect(sqlite3_open(databaseURL.path, &database) == SQLITE_OK)
@@ -350,12 +373,12 @@ func refusesNewerSchemaWithoutFallback() throws {
 
   let database = try openDatabase(at: databaseURL)
   defer { sqlite3_close(database) }
-  #expect(execute(database, "PRAGMA user_version = 2") == SQLITE_OK)
+  #expect(execute(database, "PRAGMA user_version = 3") == SQLITE_OK)
 
-  #expect(throws: LocalStoreError.unsupportedSchema(2)) {
+  #expect(throws: LocalStoreError.unsupportedSchema(3)) {
     _ = try LocalStore(path: databaseURL.path)
   }
-  #expect(try userVersion(database) == 2)
+  #expect(try userVersion(database) == 3)
   #expect(try tableExists(database, named: "installation_state") == false)
 }
 

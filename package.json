@@ -46,7 +46,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test modules/maintenance-store/src/**/*.test.ts plugins/**/*.test.ts"
+    "test": "tsx --test modules/maintenance-store/src/**/*.test.ts plugins/**/*.test.ts src/**/*.test.ts"
   },
   "private": true
 }

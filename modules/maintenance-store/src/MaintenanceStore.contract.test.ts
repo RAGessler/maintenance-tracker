@@ -35,7 +35,7 @@ test('product-store creates a vehicle without exposing storage internals', async
 
   assert.deepEqual(vehicle, { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' });
   assert.deepEqual(calls, [['Daily', 2020, 'Honda', 'Civic', '42125000']]);
-  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createMaintenanceRecord', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateVehicle']);
+  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createMaintenanceRecord', 'createMaintenanceSchedule', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'deleteMaintenanceSchedule', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getMaintenanceSchedules', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateMaintenanceSchedule', 'updateVehicle']);
 });
 
 test('product-store exposes first-run state and garage vehicles without exposing persistence details', async () => {
@@ -65,7 +65,7 @@ test('product-store exposes first-run state and garage vehicles without exposing
   assert.deepEqual(await store.product.getVehicles(), [
     { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic', currentOdometerMilliMiles: '42125000', scheduleCount: 0, trackingReadiness: 'manual_only' },
   ]);
-  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createMaintenanceRecord', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateVehicle']);
+  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createMaintenanceRecord', 'createMaintenanceSchedule', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'deleteMaintenanceSchedule', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getMaintenanceSchedules', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateMaintenanceSchedule', 'updateVehicle']);
 });
 
 test('product-store reports when an installed development client lacks the garage bridge', async () => {

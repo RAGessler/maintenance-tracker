@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { ScheduleManager } from '@/features/schedules/schedule-manager';
 import { Spacing, TorqueColors } from '@/constants/theme';
 import { maintenanceStore, type GarageVehicle } from '../../modules/maintenance-store';
 
@@ -166,6 +167,7 @@ function VehicleEditor({ vehicle, onCancel, onChanged }: Readonly<{ vehicle: Gar
     <Pressable accessibilityRole="button" accessibilityLabel="Hero photo" accessibilityHint="Opens photo options" onPress={photoOptions} style={styles.photoPanel}>{vehicle.heroPhotoUri ? <Image source={{ uri: vehicle.heroPhotoUri }} style={styles.photoPreview} accessibilityLabel={`${vehicle.nickname} hero photo`} /> : <SymbolView name={{ ios: 'photo.badge.plus', android: 'add_a_photo', web: 'image' }} tintColor={TorqueColors.primary} size={28} />}<ThemedText style={styles.photoTitle}>{vehicle.heroPhotoUri ? 'Hero photo' : 'Add a hero photo'}</ThemedText></Pressable>
     <View style={styles.fieldGroup}><Field label="Nickname" value={draft.nickname} onChangeText={(nickname) => setDraft({ ...draft, nickname })} /><Field label="Year" value={draft.year} onChangeText={(year) => setDraft({ ...draft, year })} keyboardType="number-pad" /><Field label="Make" value={draft.make} onChangeText={(make) => setDraft({ ...draft, make })} /><Field label="Model" value={draft.model} onChangeText={(model) => setDraft({ ...draft, model })} /></View>
     <View style={styles.readOnlyRow}><ThemedText style={styles.fieldLabel}>Current manual odometer</ThemedText><ThemedText>{formatMiles(vehicle.currentOdometerMilliMiles)} mi</ThemedText></View>
+    <ScheduleManager vehicleId={vehicle.id} currentOdometerMilliMiles={vehicle.currentOdometerMilliMiles} />
     {error && <ThemedText style={styles.error} accessibilityLiveRegion="polite">{error}</ThemedText>}
     <ActionButton label="Archive vehicle" onPress={archive} />
   </ScrollView></SafeAreaView></ThemedView>;
