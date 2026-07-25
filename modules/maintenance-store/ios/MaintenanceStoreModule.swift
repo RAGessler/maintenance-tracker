@@ -8,12 +8,25 @@ public class MaintenanceStoreModule: Module {
 
     AsyncFunction("getBootstrap") { () throws -> [String: Any] in
       let bootstrap = try self.localStore().bootstrap()
-      return ["disclosureAccepted": bootstrap.disclosureAccepted, "schemaVersion": bootstrap.schemaVersion]
+      return ["disclosureAccepted": bootstrap.disclosureAccepted, "disclosureVersion": bootstrap.disclosureVersion, "schemaVersion": bootstrap.schemaVersion]
     }
 
     AsyncFunction("acceptDisclosure") { (version: Int) throws -> [String: Any] in
       let bootstrap = try self.localStore().acceptDisclosure(version: version, now: Self.now())
-      return ["disclosureAccepted": bootstrap.disclosureAccepted, "schemaVersion": bootstrap.schemaVersion]
+      return ["disclosureAccepted": bootstrap.disclosureAccepted, "disclosureVersion": bootstrap.disclosureVersion, "schemaVersion": bootstrap.schemaVersion]
+    }
+
+    AsyncFunction("getVehicles") { () throws -> [[String: Any]] in
+      try self.localStore().vehicles().map {
+        [
+          "id": String($0.id),
+          "nickname": $0.nickname,
+          "year": $0.year,
+          "make": $0.make,
+          "model": $0.model,
+          "currentOdometerMilliMiles": String($0.currentOdometerMilliMiles),
+        ]
+      }
     }
 
     AsyncFunction("createVehicle") {

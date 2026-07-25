@@ -1,20 +1,21 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import { createMaintenanceStore, type NativeMaintenanceStore } from './MaintenanceStore';
+import { createMaintenanceStore, type Bootstrap, type GarageVehicle, type NativeMaintenanceStore, type TrackingSnapshot, type Vehicle } from './MaintenanceStore';
 
 declare class MaintenanceStoreModule extends NativeModule<{}> implements NativeMaintenanceStore {
-  getBootstrap(): Promise<{ disclosureAccepted: boolean; schemaVersion: number }>;
-  acceptDisclosure(version: number): Promise<{ disclosureAccepted: boolean; schemaVersion: number }>;
+  getBootstrap(): Promise<Bootstrap>;
+  acceptDisclosure(version: number): Promise<Bootstrap>;
+  getVehicles(): Promise<GarageVehicle[]>;
   createVehicle(
     nickname: string,
     year: number,
     make: string,
     model: string,
     initialOdometerMilliMiles: string,
-  ): Promise<{ id: string; nickname: string; year: number; make: string; model: string }>;
-  getTrackingSnapshot(): Promise<{ state: 'idle' | 'tracking' | 'recovering' }>;
-  startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<{ state: 'idle' | 'tracking' | 'recovering' }>;
-  stopTracking(): Promise<{ state: 'idle' | 'tracking' | 'recovering' }>;
+  ): Promise<Vehicle>;
+  getTrackingSnapshot(): Promise<TrackingSnapshot>;
+  startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
+  stopTracking(): Promise<TrackingSnapshot>;
 }
 
 const nativeMaintenanceStore = requireNativeModule<MaintenanceStoreModule>('MaintenanceStore');

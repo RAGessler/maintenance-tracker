@@ -3,4 +3,4 @@
 export { default } from './src/MaintenanceStoreModule';
 export { maintenanceStore } from './src/MaintenanceStoreModule';
 export * from './src/MaintenanceStore.types';
-export type { Bootstrap, CreateVehicleInput, MaintenanceStore, TrackingSnapshot, Vehicle } from './src/MaintenanceStore';
+export type { Bootstrap, CreateVehicleInput, GarageVehicle, MaintenanceStore, TrackingSnapshot, Vehicle } from './src/MaintenanceStore';

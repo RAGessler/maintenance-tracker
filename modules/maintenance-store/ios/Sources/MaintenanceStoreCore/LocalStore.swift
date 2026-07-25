@@ -17,6 +17,15 @@ public struct StoredVehicle: Sendable, Equatable {
   public let model: String
 }
 
+public struct StoredGarageVehicle: Sendable, Equatable {
+  public let id: Int64
+  public let nickname: String
+  public let year: Int
+  public let make: String
+  public let model: String
+  public let currentOdometerMilliMiles: Int64
+}
+
 public struct ManualOdometerReading: Sendable, Equatable {
   public let milliMiles: Int64
   public let effectiveAt: Int64
@@ -24,6 +33,7 @@ public struct ManualOdometerReading: Sendable, Equatable {
 
 public struct StoreBootstrap: Sendable, Equatable {
   public let disclosureAccepted: Bool
+  public let disclosureVersion: Int
   public let schemaVersion: Int
 }
 
@@ -71,6 +81,7 @@ public final class LocalStore: @unchecked Sendable {
 
     var createdVehicleId: Int64?
     try transaction {
+      try requireAcceptedDisclosure()
       let vehicleId = try insert(
         """
         INSERT INTO vehicle (nickname, year, make, model, created_at, updated_at)
@@ -107,6 +118,46 @@ public final class LocalStore: @unchecked Sendable {
     return ManualOdometerReading(milliMiles: row[0], effectiveAt: row[1])
   }
 
+  public func vehicles() throws -> [StoredGarageVehicle] {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    let sql = """
+      SELECT vehicle.id, vehicle.nickname, vehicle.year, vehicle.make, vehicle.model, manual_odometer_reading.milli_miles
+      FROM vehicle
+      JOIN manual_odometer_reading ON manual_odometer_reading.id = (
+        SELECT id FROM manual_odometer_reading
+        WHERE vehicle_id = vehicle.id ORDER BY effective_at DESC, id DESC LIMIT 1
+      )
+      WHERE vehicle.archived_at IS NULL
+      ORDER BY vehicle.nickname COLLATE NOCASE, vehicle.id
+      """
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+      throw failure(database)
+    }
+    defer { sqlite3_finalize(statement) }
+
+    var vehicles: [StoredGarageVehicle] = []
+    while true {
+      let result = sqlite3_step(statement)
+      if result == SQLITE_DONE { break }
+      guard result == SQLITE_ROW else { throw failure(database) }
+      guard let nickname = sqlite3_column_text(statement, 1),
+            let make = sqlite3_column_text(statement, 3),
+            let model = sqlite3_column_text(statement, 4) else {
+        throw LocalStoreError.sqlite("Vehicle row was missing required text")
+      }
+      vehicles.append(StoredGarageVehicle(
+        id: sqlite3_column_int64(statement, 0),
+        nickname: String(cString: nickname),
+        year: Int(sqlite3_column_int64(statement, 2)),
+        make: String(cString: make),
+        model: String(cString: model),
+        currentOdometerMilliMiles: sqlite3_column_int64(statement, 5)
+      ))
+    }
+    return vehicles
+  }
+
   public func schemaVersion() throws -> Int {
     Int(try scalarInt64("PRAGMA user_version", []))
   }
@@ -115,7 +166,11 @@ public final class LocalStore: @unchecked Sendable {
     guard let row = try queryOne("SELECT disclosure_version FROM installation_state WHERE id = 1", []) else {
       throw LocalStoreError.sqlite("Missing installation state")
     }
-    return StoreBootstrap(disclosureAccepted: row[0] > 0, schemaVersion: try schemaVersion())
+    return StoreBootstrap(
+      disclosureAccepted: row[0] > 0,
+      disclosureVersion: Int(row[0]),
+      schemaVersion: try schemaVersion()
+    )
   }
 
   public func acceptDisclosure(version: Int, now: Int64) throws -> StoreBootstrap {
@@ -154,9 +209,7 @@ public final class LocalStore: @unchecked Sendable {
       throw LocalStoreError.sqlite("Unsupported tracking source")
     }
     try transaction {
-      guard (try queryOne("SELECT disclosure_version FROM installation_state WHERE id = 1", [])?[0] ?? 0) > 0 else {
-        throw LocalStoreError.disclosureRequired
-      }
+      try requireAcceptedDisclosure()
       guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
         throw LocalStoreError.sqlite("Vehicle is unavailable")
       }
@@ -215,6 +268,12 @@ public final class LocalStore: @unchecked Sendable {
     Self.writeLock.lock()
     defer { Self.writeLock.unlock() }
     try transactionLocked(body)
+  }
+
+  private func requireAcceptedDisclosure() throws {
+    guard (try queryOne("SELECT disclosure_version FROM installation_state WHERE id = 1", [])?[0] ?? 0) > 0 else {
+      throw LocalStoreError.disclosureRequired
+    }
   }
 
   private func transactionLocked(_ body: () throws -> Void) throws {

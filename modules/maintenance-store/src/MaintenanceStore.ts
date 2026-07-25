@@ -16,7 +16,12 @@ export type CreateVehicleInput = Readonly<{
 
 export type Bootstrap = Readonly<{
   disclosureAccepted: boolean;
+  disclosureVersion: number;
   schemaVersion: number;
+}>;
+
+export type GarageVehicle = Vehicle & Readonly<{
+  currentOdometerMilliMiles: string;
 }>;
 
 export type TrackingSnapshot = Readonly<{
@@ -26,6 +31,7 @@ export type TrackingSnapshot = Readonly<{
 export interface NativeMaintenanceStore {
   getBootstrap(): Promise<Bootstrap>;
   acceptDisclosure(version: number): Promise<Bootstrap>;
+  getVehicles(): Promise<GarageVehicle[]>;
   createVehicle(
     nickname: string,
     year: number,
@@ -42,6 +48,7 @@ export type MaintenanceStore = Readonly<{
   product: Readonly<{
     getBootstrap(): Promise<Bootstrap>;
     acceptDisclosure(version: number): Promise<Bootstrap>;
+    getVehicles(): Promise<GarageVehicle[]>;
     createVehicle(input: CreateVehicleInput): Promise<Vehicle>;
   }>;
   tracking: Readonly<{
@@ -56,6 +63,7 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
     product: {
       getBootstrap: () => native.getBootstrap(),
       acceptDisclosure: (version) => native.acceptDisclosure(version),
+      getVehicles: () => native.getVehicles(),
       createVehicle: (input) =>
         native.createVehicle(
           input.nickname,
