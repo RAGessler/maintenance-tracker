@@ -43,7 +43,11 @@ export function ScheduleManager({ vehicleId, currentOdometerMilliMiles }: Readon
       if (editing) await maintenanceStore.product.updateMaintenanceSchedule({ id: editing.id, ...input });
       else await maintenanceStore.product.createMaintenanceSchedule({ vehicleId, ...input });
       setDraft(null); setEditing(null); await load();
-    } catch { setError('The schedule could not be saved. Your changes are still here.'); }
+    } catch (error: unknown) {
+      setError(error instanceof Error && error.message.includes('Rebuild the iOS development client')
+        ? 'Rebuild the iOS development client to save maintenance schedules.'
+        : 'The schedule could not be saved. Your changes are still here.');
+    }
   };
 
   const remove = (schedule: MaintenanceSchedule) => Alert.alert('Delete this schedule?', `${schedule.serviceName} will no longer appear in Due. Completed maintenance history is not deleted.`, [
