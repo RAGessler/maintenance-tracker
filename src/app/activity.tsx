@@ -17,8 +17,10 @@ export default function ActivityScreen() {
   const [editing, setEditing] = useState<MaintenanceRecord | null>(null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const load = async (vehicleId = selectedVehicleId) => {
+    setLoading(true);
     try {
       setError(null);
       const loadedVehicles = await maintenanceStore.product.getVehicles();
@@ -26,8 +28,12 @@ export default function ActivityScreen() {
       setVehicles(loadedVehicles);
       setSelectedVehicleId(nextVehicleId);
       setRecords(nextVehicleId ? await maintenanceStore.product.getMaintenanceRecords(nextVehicleId) : []);
-    } catch {
-      setError('Maintenance history could not be loaded. Try again.');
+    } catch (loadError: unknown) {
+      setError(loadError instanceof Error && loadError.message.startsWith('Rebuild the iOS development client')
+        ? loadError.message
+        : 'Maintenance history could not be loaded. Try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -46,11 +52,11 @@ export default function ActivityScreen() {
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content}>
           <ThemedText accessibilityRole="header" style={styles.title}>Activity</ThemedText>
-          {error && vehicles.length === 0 ? <View style={styles.empty}><ThemedText accessibilityLiveRegion="polite" style={styles.error}>{error}</ThemedText><ActionButton label="Try again" onPress={() => void load()} /></View> : vehicles.length === 0 ? <ThemedText style={styles.muted}>Add a vehicle in Garage before recording maintenance.</ThemedText> : <>
+          {error && vehicles.length === 0 ? <View style={styles.empty}><ThemedText accessibilityLiveRegion="polite" style={styles.error}>{error}</ThemedText><ActionButton label={loading ? 'Retrying...' : 'Try again'} disabled={loading} onPress={() => void load()} /></View> : vehicles.length === 0 ? <ThemedText style={styles.muted}>Add a vehicle in Garage before recording maintenance.</ThemedText> : <>
             <View style={styles.vehiclePicker} accessibilityRole="radiogroup" accessibilityLabel="Vehicle history">
               {vehicles.map((vehicle) => <Pressable key={vehicle.id} accessibilityRole="radio" accessibilityState={{ selected: vehicle.id === selectedVehicleId }} onPress={() => { setSelectedVehicleId(vehicle.id); void load(vehicle.id); }} style={[styles.vehicleChoice, vehicle.id === selectedVehicleId && styles.vehicleChoiceSelected]}><ThemedText style={vehicle.id === selectedVehicleId ? styles.selectedText : undefined}>{vehicle.nickname}</ThemedText></Pressable>)}
             </View>
-            {error ? <View style={styles.empty}><ThemedText accessibilityLiveRegion="polite" style={styles.error}>{error}</ThemedText><ActionButton label="Try again" onPress={() => void load()} /></View> : <>
+            {error ? <View style={styles.empty}><ThemedText accessibilityLiveRegion="polite" style={styles.error}>{error}</ThemedText><ActionButton label={loading ? 'Retrying...' : 'Try again'} disabled={loading} onPress={() => void load()} /></View> : <>
               <View style={styles.sectionHeader}><ThemedText accessibilityRole="header" style={styles.sectionTitle}>Maintenance history</ThemedText><ActionButton label="Add record" onPress={() => setAdding(true)} /></View>
               {records.length === 0 ? <ThemedText style={styles.muted}>No completed maintenance records for this vehicle.</ThemedText> : records.map((record) => <RecordCard key={record.id} record={record} onEdit={() => setEditing(record)} onDelete={() => { Alert.alert('Delete this record?', 'This cannot be undone.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { try { await maintenanceStore.product.deleteMaintenanceRecord(record.id); await load(); } catch { setError('The record could not be deleted. Try again.'); } } }]); }} />)}
             </>}
@@ -85,7 +91,7 @@ function MaintenanceForm({ vehicleId, record, onCancel, onSaved }: Readonly<{ ve
 }
 
 function Field({ label, ...props }: Readonly<{ label: string } & React.ComponentProps<typeof TextInput>>) { return <View style={styles.field}><ThemedText style={styles.label}>{label}</ThemedText><TextInput {...props} accessibilityLabel={label} placeholderTextColor={TorqueColors.secondary} style={styles.input} /></View>; }
-function ActionButton({ label, onPress }: Readonly<{ label: string; onPress: () => void }>) { return <Pressable accessibilityRole="button" onPress={onPress} style={styles.action}><ThemedText style={styles.actionText}>{label}</ThemedText></Pressable>; }
+function ActionButton({ label, onPress, disabled = false }: Readonly<{ label: string; onPress: () => void; disabled?: boolean }>) { return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.action, disabled && styles.disabled]}><ThemedText style={styles.actionText}>{label}</ThemedText></Pressable>; }
 function decimalToMilliMiles(value: string) { const [whole, fraction = ''] = value.trim().split('.'); return `${BigInt(whole) * 1_000n + BigInt(fraction.padEnd(3, '0'))}`; }
 function formatMilliMiles(value: string) { const milli = BigInt(value); const whole = milli / 1_000n; const fraction = (milli % 1_000n).toString().padStart(3, '0').replace(/0+$/, ''); return fraction ? `${whole}.${fraction}` : whole.toString(); }
 
