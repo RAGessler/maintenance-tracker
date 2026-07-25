@@ -42,7 +42,7 @@
     "start:go": "expo start --go",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
-    "ios": "expo run:ios",
+    "ios": "expo run:ios --device \"iPhone 17 Pro\"",
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
