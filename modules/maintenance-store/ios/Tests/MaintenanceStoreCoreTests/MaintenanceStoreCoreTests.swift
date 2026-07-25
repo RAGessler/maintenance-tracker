@@ -205,6 +205,86 @@ func constrainsPersistedTripCodes() throws {
   #expect(insertRevision(database, tripID: tripID, revision: 12, reason: "unsupported") == SQLITE_CONSTRAINT)
 }
 
+@Test("a failed migration rolls back and a corrected store retries from the same version")
+func retriesFailedMigrationWithoutDestructiveFallback() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+  #expect(execute(database, "CREATE TABLE vehicle (id INTEGER PRIMARY KEY)") == SQLITE_OK)
+
+  #expect(throws: LocalStoreError.self) {
+    _ = try LocalStore(path: databaseURL.path)
+  }
+  #expect(try userVersion(database) == 0)
+  #expect(try tableExists(database, named: "installation_state") == false)
+
+  #expect(execute(database, "DROP TABLE vehicle") == SQLITE_OK)
+  let store = try LocalStore(path: databaseURL.path)
+  #expect(try store.schemaVersion() == LocalStore.currentSchemaVersion)
+}
+
+@Test("a newer schema remains untouched and blocks opening")
+func refusesNewerSchemaWithoutFallback() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+  #expect(execute(database, "PRAGMA user_version = 2") == SQLITE_OK)
+
+  #expect(throws: LocalStoreError.unsupportedSchema(2)) {
+    _ = try LocalStore(path: databaseURL.path)
+  }
+  #expect(try userVersion(database) == 2)
+  #expect(try tableExists(database, named: "installation_state") == false)
+}
+
+@Test("reconciliation removes stale files and missing photo references without deleting referenced files")
+func reconcilesPhotoFiles() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  let photosURL = directoryURL.appendingPathComponent("photos", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  try FileManager.default.createDirectory(at: photosURL, withIntermediateDirectories: true)
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(
+    nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 1
+  )
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+  #expect(execute(database, "INSERT INTO photo_asset (vehicle_id, relative_filename, media_type, byte_count, checksum, created_at) VALUES (\(vehicle.id), 'referenced.jpg', 'image/jpeg', 1, 'a', 1)") == SQLITE_OK)
+  #expect(execute(database, "INSERT INTO vehicle (nickname, year, make, model, created_at, updated_at) VALUES ('Other', 2021, 'Honda', 'Fit', 1, 1)") == SQLITE_OK)
+  #expect(execute(database, "INSERT INTO photo_asset (vehicle_id, relative_filename, media_type, byte_count, checksum, created_at) VALUES (2, 'missing.jpg', 'image/jpeg', 1, 'b', 1)") == SQLITE_OK)
+  try Data("photo".utf8).write(to: photosURL.appendingPathComponent("referenced.jpg"))
+  try Data("stale".utf8).write(to: photosURL.appendingPathComponent("stale.tmp"))
+  try Data("unreferenced".utf8).write(to: photosURL.appendingPathComponent("unreferenced.jpg"))
+
+  try store.reconcilePhotoFiles(in: photosURL)
+
+  #expect(FileManager.default.fileExists(atPath: photosURL.appendingPathComponent("referenced.jpg").path))
+  #expect(!FileManager.default.fileExists(atPath: photosURL.appendingPathComponent("stale.tmp").path))
+  #expect(!FileManager.default.fileExists(atPath: photosURL.appendingPathComponent("unreferenced.jpg").path))
+  #expect(try scalar(database, "SELECT COUNT(*) FROM photo_asset") == 1)
+}
+
+@Test("representative garage and odometer reads use their approved indexes")
+func usesApprovedReadIndexes() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  _ = try LocalStore(path: databaseURL.path)
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+
+  #expect(try queryPlan(database, "SELECT id FROM vehicle WHERE archived_at IS NULL ORDER BY nickname COLLATE NOCASE").contains("vehicle_active_nickname"))
+  #expect(try queryPlan(database, "SELECT milli_miles FROM manual_odometer_reading WHERE vehicle_id = 1 ORDER BY effective_at DESC, id DESC LIMIT 1").contains("odometer_latest"))
+}
+
 private func insertTrip(
   _ database: OpaquePointer,
   source: String = "automatic",
@@ -253,4 +333,53 @@ private func execute(_ database: OpaquePointer, _ sql: String) -> Int32 {
   let result = sqlite3_exec(database, sql, nil, nil, &error)
   sqlite3_free(error)
   return result
+}
+
+private func temporaryDirectory() throws -> URL {
+  let directoryURL = FileManager.default.temporaryDirectory
+    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+  try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+  return directoryURL
+}
+
+private func openDatabase(at url: URL) throws -> OpaquePointer {
+  var database: OpaquePointer?
+  guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
+    throw LocalStoreError.sqlite("Could not open test database")
+  }
+  return database
+}
+
+private func scalar(_ database: OpaquePointer, _ sql: String) throws -> Int64 {
+  var statement: OpaquePointer?
+  guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+    throw LocalStoreError.sqlite("Could not prepare test query")
+  }
+  defer { sqlite3_finalize(statement) }
+  guard sqlite3_step(statement) == SQLITE_ROW else {
+    throw LocalStoreError.sqlite("Test query returned no row")
+  }
+  return sqlite3_column_int64(statement, 0)
+}
+
+private func userVersion(_ database: OpaquePointer) throws -> Int64 {
+  try scalar(database, "PRAGMA user_version")
+}
+
+private func tableExists(_ database: OpaquePointer, named name: String) throws -> Bool {
+  try scalar(database, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '\(name)'") == 1
+}
+
+private func queryPlan(_ database: OpaquePointer, _ sql: String) throws -> String {
+  var statement: OpaquePointer?
+  guard sqlite3_prepare_v2(database, "EXPLAIN QUERY PLAN \(sql)", -1, &statement, nil) == SQLITE_OK, let statement else {
+    throw LocalStoreError.sqlite("Could not prepare query plan")
+  }
+  defer { sqlite3_finalize(statement) }
+  var details: [String] = []
+  while sqlite3_step(statement) == SQLITE_ROW {
+    guard let detail = sqlite3_column_text(statement, 3) else { continue }
+    details.append(String(cString: detail))
+  }
+  return details.joined(separator: "\n")
 }

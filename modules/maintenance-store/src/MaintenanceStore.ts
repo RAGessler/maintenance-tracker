@@ -20,6 +20,13 @@ export type Bootstrap = Readonly<{
   schemaVersion: number;
 }>;
 
+export type RecoveryState = Readonly<{
+  state: 'ready';
+}> | Readonly<{
+  state: 'recovery_required';
+  reason: 'unsupported_schema' | 'opening_failed';
+}>;
+
 export type GarageVehicle = Vehicle & Readonly<{
   currentOdometerMilliMiles: string;
 }>;
@@ -30,7 +37,9 @@ export type TrackingSnapshot = Readonly<{
 
 export interface NativeMaintenanceStore {
   getBootstrap(): Promise<Bootstrap>;
+  getRecoveryState(): Promise<RecoveryState>;
   acceptDisclosure(version: number): Promise<Bootstrap>;
+  deleteAllData(): Promise<Bootstrap>;
   getVehicles(): Promise<GarageVehicle[]>;
   createVehicle(
     nickname: string,
@@ -47,7 +56,9 @@ export interface NativeMaintenanceStore {
 export type MaintenanceStore = Readonly<{
   product: Readonly<{
     getBootstrap(): Promise<Bootstrap>;
+    getRecoveryState(): Promise<RecoveryState>;
     acceptDisclosure(version: number): Promise<Bootstrap>;
+    deleteAllData(): Promise<Bootstrap>;
     getVehicles(): Promise<GarageVehicle[]>;
     createVehicle(input: CreateVehicleInput): Promise<Vehicle>;
   }>;
@@ -62,7 +73,9 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
   return {
     product: {
       getBootstrap: () => native.getBootstrap(),
+      getRecoveryState: () => native.getRecoveryState(),
       acceptDisclosure: (version) => native.acceptDisclosure(version),
+      deleteAllData: () => native.deleteAllData(),
       getVehicles: () => {
         if (typeof native.getVehicles !== 'function') {
           return Promise.reject(new Error('Rebuild the iOS development client to load Garage vehicles.'));

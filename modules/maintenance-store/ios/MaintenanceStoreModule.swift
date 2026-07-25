@@ -2,6 +2,7 @@ import ExpoModulesCore
 
 public class MaintenanceStoreModule: Module {
   private var store: LocalStore?
+  private var openingError: LocalStoreError?
 
   public func definition() -> ModuleDefinition {
     Name("MaintenanceStore")
@@ -11,8 +12,36 @@ public class MaintenanceStoreModule: Module {
       return ["disclosureAccepted": bootstrap.disclosureAccepted, "disclosureVersion": bootstrap.disclosureVersion, "schemaVersion": bootstrap.schemaVersion]
     }
 
+    AsyncFunction("getRecoveryState") { () -> [String: String] in
+      do {
+        _ = try self.localStore()
+        return ["state": "ready"]
+      } catch let error as LocalStoreError {
+        switch error {
+        case .unsupportedSchema:
+          return ["state": "recovery_required", "reason": "unsupported_schema"]
+        default:
+          return ["state": "recovery_required", "reason": "opening_failed"]
+        }
+      } catch {
+        return ["state": "recovery_required", "reason": "opening_failed"]
+      }
+    }
+
     AsyncFunction("acceptDisclosure") { (version: Int) throws -> [String: Any] in
       let bootstrap = try self.localStore().acceptDisclosure(version: version, now: Self.now())
+      return ["disclosureAccepted": bootstrap.disclosureAccepted, "disclosureVersion": bootstrap.disclosureVersion, "schemaVersion": bootstrap.schemaVersion]
+    }
+
+    AsyncFunction("deleteAllData") { () throws -> [String: Any] in
+      self.store?.close()
+      self.store = nil
+      self.openingError = nil
+      let directory = try self.storeDirectory()
+      if FileManager.default.fileExists(atPath: directory.path) {
+        try FileManager.default.removeItem(at: directory)
+      }
+      let bootstrap = try self.localStore().bootstrap()
       return ["disclosureAccepted": bootstrap.disclosureAccepted, "disclosureVersion": bootstrap.disclosureVersion, "schemaVersion": bootstrap.schemaVersion]
     }
 
@@ -66,6 +95,19 @@ public class MaintenanceStoreModule: Module {
 
   private func localStore() throws -> LocalStore {
     if let store { return store }
+    if let openingError { throw openingError }
+    let directory = try storeDirectory()
+    do {
+      let store = try LocalStore(path: directory.appendingPathComponent("product.sqlite").path)
+      self.store = store
+      return store
+    } catch let error as LocalStoreError {
+      openingError = error
+      throw error
+    }
+  }
+
+  private func storeDirectory() throws -> URL {
     var directory = try FileManager.default.url(
       for: .applicationSupportDirectory,
       in: .userDomainMask,
@@ -80,9 +122,7 @@ public class MaintenanceStoreModule: Module {
     var resourceValues = URLResourceValues()
     resourceValues.isExcludedFromBackup = true
     try directory.setResourceValues(resourceValues)
-    let store = try LocalStore(path: directory.appendingPathComponent("product.sqlite").path)
-    self.store = store
-    return store
+    return directory
   }
 
   private static func now() -> Int64 {

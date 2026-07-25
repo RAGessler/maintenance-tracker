@@ -51,13 +51,25 @@ public final class LocalStore: @unchecked Sendable {
       throw LocalStoreError.sqlite("Unable to open the local store")
     }
     database = connection
-    try migrate(connection)
+    do {
+      try migrate(connection)
+    } catch {
+      sqlite3_close(connection)
+      database = nil
+      throw error
+    }
   }
 
   deinit {
-    if let database {
-      sqlite3_close(database)
-    }
+    close()
+  }
+
+  public func close() {
+    Self.writeLock.lock()
+    defer { Self.writeLock.unlock() }
+    guard let database else { return }
+    sqlite3_close(database)
+    self.database = nil
   }
 
   public func createVehicle(
@@ -234,6 +246,40 @@ public final class LocalStore: @unchecked Sendable {
     }
   }
 
+  public func reconcilePhotoFiles(in directoryURL: URL) throws {
+    Self.writeLock.lock()
+    defer { Self.writeLock.unlock() }
+
+    let fileManager = FileManager.default
+    let missingAssetIDs = try photoAssets().compactMap { asset in
+      guard let url = photoFileURL(for: asset.filename, in: directoryURL),
+            fileManager.fileExists(atPath: url.path) else {
+        return asset.id
+      }
+      return nil
+    }
+    try transactionLocked {
+      for id in missingAssetIDs {
+        try run("DELETE FROM photo_asset WHERE id = ?", [.integer(id)])
+      }
+    }
+    guard fileManager.fileExists(atPath: directoryURL.path) else { return }
+
+    let referencedFilenames = Set(try photoAssets().map(\.filename))
+    for fileURL in try fileManager.contentsOfDirectory(
+      at: directoryURL,
+      includingPropertiesForKeys: [.isRegularFileKey],
+      options: []
+    ) {
+      let resourceValues = try fileURL.resourceValues(forKeys: [.isRegularFileKey])
+      guard resourceValues.isRegularFile == true,
+            referencedFilenames.contains(fileURL.lastPathComponent) == false else {
+        continue
+      }
+      try fileManager.removeItem(at: fileURL)
+    }
+  }
+
   private func configure(_ connection: OpaquePointer) throws {
     try execute("PRAGMA foreign_keys = ON")
     try execute("PRAGMA journal_mode = WAL")
@@ -318,6 +364,42 @@ public final class LocalStore: @unchecked Sendable {
     case SQLITE_DONE: return nil
     default: throw failure(database)
     }
+  }
+
+  private func photoAssets() throws -> [(id: Int64, filename: String)] {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, "SELECT id, relative_filename FROM photo_asset", -1, &statement, nil) == SQLITE_OK,
+          let statement else {
+      throw failure(database)
+    }
+    defer { sqlite3_finalize(statement) }
+
+    var assets: [(id: Int64, filename: String)] = []
+    while true {
+      switch sqlite3_step(statement) {
+      case SQLITE_DONE:
+        return assets
+      case SQLITE_ROW:
+        guard let filename = sqlite3_column_text(statement, 1) else {
+          throw LocalStoreError.sqlite("Photo asset was missing its filename")
+        }
+        assets.append((sqlite3_column_int64(statement, 0), String(cString: filename)))
+      default:
+        throw failure(database)
+      }
+    }
+  }
+
+  private func photoFileURL(for filename: String, in directoryURL: URL) -> URL? {
+    guard !filename.isEmpty,
+          !filename.contains("/"),
+          !filename.contains("\\"),
+          filename != ".",
+          filename != ".." else {
+      return nil
+    }
+    return directoryURL.appendingPathComponent(filename, isDirectory: false)
   }
 
   private func run(_ sql: String, _ values: [Binding]) throws {

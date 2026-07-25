@@ -1,10 +1,12 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import { createMaintenanceStore, type Bootstrap, type GarageVehicle, type NativeMaintenanceStore, type TrackingSnapshot, type Vehicle } from './MaintenanceStore';
+import { createMaintenanceStore, type Bootstrap, type GarageVehicle, type NativeMaintenanceStore, type RecoveryState, type TrackingSnapshot, type Vehicle } from './MaintenanceStore';
 
 declare class MaintenanceStoreModule extends NativeModule<{}> implements NativeMaintenanceStore {
   getBootstrap(): Promise<Bootstrap>;
+  getRecoveryState(): Promise<RecoveryState>;
   acceptDisclosure(version: number): Promise<Bootstrap>;
+  deleteAllData(): Promise<Bootstrap>;
   getVehicles(): Promise<GarageVehicle[]>;
   createVehicle(
     nickname: string,
