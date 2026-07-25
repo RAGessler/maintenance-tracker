@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, type Href, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { ActionSheetIOS, Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
@@ -124,7 +124,6 @@ function ArchivedVehicleCard({ vehicle, onChanged }: Readonly<{ vehicle: GarageV
 }
 
 function VehicleEditor({ vehicle, onCancel, onChanged, openScheduleId }: Readonly<{ vehicle: GarageVehicle; onCancel: () => void; onChanged: () => void; openScheduleId?: string }>) {
-  const scrollRef = useRef<ScrollView>(null);
   const [draft, setDraft] = useState({ nickname: vehicle.nickname, year: String(vehicle.year), make: vehicle.make, model: vehicle.model });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -163,13 +162,13 @@ function VehicleEditor({ vehicle, onCancel, onChanged, openScheduleId }: Readonl
       if (vehicle.heroPhotoUri && index === 1) void removePhoto();
     });
   };
-  return <ThemedView style={styles.screen}><SafeAreaView style={styles.safeArea}><ScrollView ref={scrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <ThemedView style={styles.screen}><SafeAreaView style={styles.safeArea}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
     <View style={styles.formNavigation}><Pressable accessibilityRole="button" onPress={onCancel}><ThemedText style={styles.navigationAction}>Cancel</ThemedText></Pressable><ThemedText accessibilityRole="header" style={styles.formTitle}>Vehicle profile</ThemedText><Pressable accessibilityRole="button" disabled={!valid || saving} onPress={save}><ThemedText style={[styles.navigationAction, (!valid || saving) && styles.disabled]}>Save</ThemedText></Pressable></View>
     <ThemedText style={styles.formIntro}>Identity fields can be changed here. Odometer readings remain an auditable history and are updated separately.</ThemedText>
     <Pressable accessibilityRole="button" accessibilityLabel="Hero photo" accessibilityHint="Opens photo options" onPress={photoOptions} style={styles.photoPanel}>{vehicle.heroPhotoUri ? <Image source={{ uri: vehicle.heroPhotoUri }} style={styles.photoPreview} accessibilityLabel={`${vehicle.nickname} hero photo`} /> : <SymbolView name={{ ios: 'photo.badge.plus', android: 'add_a_photo', web: 'image' }} tintColor={TorqueColors.primary} size={28} />}<ThemedText style={styles.photoTitle}>{vehicle.heroPhotoUri ? 'Hero photo' : 'Add a hero photo'}</ThemedText></Pressable>
     <View style={styles.fieldGroup}><Field label="Nickname" value={draft.nickname} onChangeText={(nickname) => setDraft({ ...draft, nickname })} /><Field label="Year" value={draft.year} onChangeText={(year) => setDraft({ ...draft, year })} keyboardType="number-pad" /><Field label="Make" value={draft.make} onChangeText={(make) => setDraft({ ...draft, make })} /><Field label="Model" value={draft.model} onChangeText={(model) => setDraft({ ...draft, model })} /></View>
     <View style={styles.readOnlyRow}><ThemedText style={styles.fieldLabel}>Current manual odometer</ThemedText><ThemedText>{formatMiles(vehicle.currentOdometerMilliMiles)} mi</ThemedText></View>
-    <ScheduleManager vehicleId={vehicle.id} currentOdometerMilliMiles={vehicle.currentOdometerMilliMiles} highlightedScheduleId={openScheduleId} scrollRef={scrollRef} />
+    <ScheduleManager vehicleId={vehicle.id} currentOdometerMilliMiles={vehicle.currentOdometerMilliMiles} highlightedScheduleId={openScheduleId} />
     {error && <ThemedText style={styles.error} accessibilityLiveRegion="polite">{error}</ThemedText>}
     <ActionButton label="Archive vehicle" onPress={archive} />
   </ScrollView></SafeAreaView></ThemedView>;
