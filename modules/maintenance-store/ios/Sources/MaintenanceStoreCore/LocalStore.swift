@@ -364,9 +364,13 @@ CREATE INDEX maintenance_record_schedule_date ON maintenance_record(schedule_id,
 CREATE TABLE trip (
   id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL CHECK(source IN ('automatic', 'manual')),
   proposed_vehicle_id INTEGER REFERENCES vehicle(id) ON DELETE SET NULL, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL,
-  captured_milli_miles INTEGER CHECK(captured_milli_miles >= 0), movement_outcome TEXT NOT NULL,
-  normal_completion_outcome TEXT NOT NULL, route_corroboration_outcome TEXT NOT NULL,
-  quality_counters_json TEXT NOT NULL, failure_reason TEXT
+  captured_milli_miles INTEGER CHECK(captured_milli_miles >= 0),
+  movement_outcome TEXT NOT NULL CHECK(movement_outcome IN ('confirmed', 'not_confirmed')),
+  normal_completion_outcome TEXT NOT NULL CHECK(normal_completion_outcome IN ('explicit_end', 'route_loss_after_grace', 'not_completed')),
+  route_corroboration_outcome TEXT NOT NULL CHECK(route_corroboration_outcome IN ('matched', 'not_observed', 'unknown', 'conflicting', 'not_required')),
+  quality_counters_json TEXT NOT NULL,
+  failure_reason TEXT CHECK(failure_reason IS NULL OR failure_reason IN ('movement_not_confirmed', 'unusable_distance', 'location_permission_lost', 'location_failed', 'restoration_failed', 'maximum_duration_exceeded')),
+  CHECK((source = 'manual' AND route_corroboration_outcome = 'not_required') OR (source = 'automatic' AND route_corroboration_outcome <> 'not_required'))
 );
 CREATE INDEX trip_ended_at ON trip(ended_at DESC);
 CREATE INDEX trip_proposed_vehicle ON trip(proposed_vehicle_id);
@@ -379,9 +383,11 @@ CREATE INDEX trip_state_vehicle_disposition ON trip_state(vehicle_id, dispositio
 CREATE TABLE trip_revision (
   id INTEGER PRIMARY KEY AUTOINCREMENT, trip_id INTEGER NOT NULL REFERENCES trip(id) ON DELETE CASCADE,
   revision_number INTEGER NOT NULL, occurred_at INTEGER NOT NULL, actor TEXT NOT NULL CHECK(actor IN ('system', 'user')),
-  action TEXT NOT NULL, vehicle_id INTEGER REFERENCES vehicle(id) ON DELETE SET NULL,
-  effective_milli_miles INTEGER CHECK(effective_milli_miles >= 0), disposition TEXT NOT NULL,
-  reason TEXT, UNIQUE(trip_id, revision_number)
+  action TEXT NOT NULL CHECK(action IN ('finalized', 'confirmed', 'corrected', 'reassigned', 'rejected')),
+  vehicle_id INTEGER REFERENCES vehicle(id) ON DELETE SET NULL,
+  effective_milli_miles INTEGER CHECK(effective_milli_miles >= 0),
+  disposition TEXT NOT NULL CHECK(disposition IN ('review_required', 'confirmed', 'rejected', 'failed')),
+  reason TEXT CHECK(reason IS NULL), UNIQUE(trip_id, revision_number)
 );
 CREATE INDEX trip_revision_vehicle ON trip_revision(vehicle_id);
 CREATE TABLE tracking_session (
