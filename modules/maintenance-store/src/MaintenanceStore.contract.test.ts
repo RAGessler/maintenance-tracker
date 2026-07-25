@@ -56,6 +56,22 @@ test('product-store exposes first-run state and garage vehicles without exposing
   assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'createVehicle', 'getBootstrap', 'getVehicles']);
 });
 
+test('product-store reports when an installed development client lacks the garage bridge', async () => {
+  const native = {
+    getBootstrap: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 1 }),
+    acceptDisclosure: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 1 }),
+    createVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    getTrackingSnapshot: async () => ({ state: 'idle' as const }),
+    startTracking: async () => ({ state: 'tracking' as const }),
+    stopTracking: async () => ({ state: 'idle' as const }),
+  } as unknown as NativeMaintenanceStore;
+
+  await assert.rejects(
+    () => createMaintenanceStore(native).product.getVehicles(),
+    /Rebuild the iOS development client/,
+  );
+});
+
 test('trip-tracking forwards only typed foundation commands', async () => {
   const calls: unknown[][] = [];
   const native: NativeMaintenanceStore = {

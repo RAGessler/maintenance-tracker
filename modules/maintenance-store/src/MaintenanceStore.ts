@@ -63,7 +63,12 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
     product: {
       getBootstrap: () => native.getBootstrap(),
       acceptDisclosure: (version) => native.acceptDisclosure(version),
-      getVehicles: () => native.getVehicles(),
+      getVehicles: () => {
+        if (typeof native.getVehicles !== 'function') {
+          return Promise.reject(new Error('Rebuild the iOS development client to load Garage vehicles.'));
+        }
+        return native.getVehicles();
+      },
       createVehicle: (input) =>
         native.createVehicle(
           input.nickname,

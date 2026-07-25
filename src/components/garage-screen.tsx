@@ -14,20 +14,20 @@ const emptyDraft: Draft = { nickname: '', year: '', make: '', model: '', odomete
 export function GarageScreen() {
   const [vehicles, setVehicles] = useState<GarageVehicle[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
   const loadVehicles = () => {
     setLoading(true);
-    setLoadError(false);
-    maintenanceStore.product.getVehicles().then(setVehicles).catch(() => setLoadError(true)).finally(() => setLoading(false));
+    setLoadError(null);
+    maintenanceStore.product.getVehicles().then(setVehicles).catch((error: unknown) => setLoadError(error instanceof Error ? error.message : 'Vehicles could not be loaded.')).finally(() => setLoading(false));
   };
 
   useEffect(() => {
     let active = true;
     maintenanceStore.product.getVehicles()
       .then((loadedVehicles) => { if (active) setVehicles(loadedVehicles); })
-      .catch(() => { if (active) setLoadError(true); })
+      .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : 'Vehicles could not be loaded.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
@@ -43,7 +43,7 @@ export function GarageScreen() {
           <ThemedText type="subtitle" accessibilityRole="header">Garage</ThemedText>
           {loading ? <ThemedText>Loading vehicles...</ThemedText> : loadError ? (
             <View style={styles.empty}>
-              <ThemedText>Vehicles could not be loaded.</ThemedText>
+              <ThemedText accessibilityLiveRegion="polite">{loadError}</ThemedText>
               <ActionButton label="Try again" onPress={loadVehicles} />
             </View>
           ) : vehicles.length === 0 ? (
