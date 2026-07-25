@@ -212,8 +212,20 @@ public class MaintenanceStoreModule: Module {
     }
 
     AsyncFunction("stopTracking") { () throws -> [String: String] in
-      try self.localStore().stopTracking()
+      try self.localStore().stopTracking(now: Self.now())
       return ["state": "idle"]
+    }
+
+    AsyncFunction("getTrips") { (vehicleId: String) throws -> [[String: Any]] in
+      guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidTrip }
+      return try self.localStore().trips(for: nativeVehicleId).map(Self.tripDictionary)
+    }
+
+    AsyncFunction("reviewTrip") { (tripId: String, action: String, effectiveMilliMiles: String?, vehicleId: String?) throws -> [String: Any] in
+      guard let nativeTripId = Int64(tripId) else { throw LocalStoreError.invalidTrip }
+      let nativeMileage = try Self.optionalMilliMiles(effectiveMilliMiles)
+      let nativeVehicleId = vehicleId.flatMap(Int64.init)
+      return Self.tripDictionary(try self.localStore().reviewTrip(id: nativeTripId, action: action, effectiveMilliMiles: nativeMileage, vehicleId: nativeVehicleId, now: Self.now()))
     }
   }
 
@@ -342,6 +354,18 @@ public class MaintenanceStoreModule: Module {
     guard let value, !value.isEmpty else { return nil }
     guard let milliMiles = Int64(value), milliMiles > 0 else { throw LocalStoreError.invalidMaintenanceSchedule }
     return milliMiles
+  }
+
+  private static func tripDictionary(_ trip: StoredTrip) -> [String: Any] {
+    var result: [String: Any] = [
+      "id": String(trip.id), "startedAt": String(trip.startedAt), "endedAt": String(trip.endedAt),
+      "disposition": trip.disposition,
+    ]
+    if let vehicleId = trip.vehicleId { result["vehicleId"] = String(vehicleId) }
+    if let capturedMilliMiles = trip.capturedMilliMiles { result["capturedMilliMiles"] = String(capturedMilliMiles) }
+    if let effectiveMilliMiles = trip.effectiveMilliMiles { result["effectiveMilliMiles"] = String(effectiveMilliMiles) }
+    if let failureReason = trip.failureReason { result["failureReason"] = failureReason }
+    return result
   }
 
   private static func maintenanceScheduleDictionary(_ schedule: StoredMaintenanceSchedule) -> [String: Any] {

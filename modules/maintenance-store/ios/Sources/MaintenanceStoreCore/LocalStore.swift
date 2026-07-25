@@ -5,6 +5,7 @@ public enum LocalStoreError: Error, Equatable {
   case invalidVehicle
   case invalidMaintenanceRecord
   case invalidMaintenanceSchedule
+  case invalidTrip
   case invalidPhoto
   case disclosureRequired
   case trackingConflict
@@ -40,6 +41,17 @@ public struct ManualOdometerReading: Sendable, Equatable {
 public struct ConfirmedTripDistance: Sendable, Equatable {
   public let endedAt: Int64
   public let effectiveMilliMiles: Int64
+}
+
+public struct StoredTrip: Sendable, Equatable {
+  public let id: Int64
+  public let vehicleId: Int64?
+  public let startedAt: Int64
+  public let endedAt: Int64
+  public let capturedMilliMiles: Int64?
+  public let effectiveMilliMiles: Int64?
+  public let disposition: String
+  public let failureReason: String?
 }
 
 public struct StoredMaintenanceRecord: Sendable, Equatable {
@@ -473,10 +485,51 @@ public final class LocalStore: @unchecked Sendable {
     }
   }
 
-  public func stopTracking() throws {
+  public func stopTracking(now: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)) throws {
     try transaction {
+      guard let session = try queryOne("SELECT intended_vehicle_id, started_at, movement_observed, cumulative_milli_miles FROM tracking_session WHERE id = 1", []) else { return }
+      let hasUsableDistance = session[2] == 1 && session[3] > 0
+      let tripId = try insert(
+        "INSERT INTO trip (source, proposed_vehicle_id, started_at, ended_at, captured_milli_miles, movement_outcome, normal_completion_outcome, route_corroboration_outcome, quality_counters_json, failure_reason) VALUES ('manual', ?, ?, ?, ?, ?, 'explicit_end', 'not_required', '{}', ?)",
+        [.integer(session[0]), .integer(session[1]), .integer(now), hasUsableDistance ? .integer(session[3]) : .null, .text(hasUsableDistance ? "confirmed" : "not_confirmed"), hasUsableDistance ? .null : .text("movement_not_confirmed")]
+      )
+      try run("INSERT INTO trip_state (trip_id, vehicle_id, effective_milli_miles, disposition, updated_at) VALUES (?, ?, ?, ?, ?)", [.integer(tripId), .integer(session[0]), hasUsableDistance ? .integer(session[3]) : .null, .text(hasUsableDistance ? "confirmed" : "review_required"), .integer(now)])
+      try run("INSERT INTO trip_revision (trip_id, revision_number, occurred_at, actor, action, vehicle_id, effective_milli_miles, disposition) VALUES (?, 1, ?, 'system', 'finalized', ?, ?, ?)", [.integer(tripId), .integer(now), .integer(session[0]), hasUsableDistance ? .integer(session[3]) : .null, .text(hasUsableDistance ? "confirmed" : "review_required")])
       try run("DELETE FROM tracking_session WHERE id = 1", [])
     }
+  }
+
+  public func trips(for vehicleId: Int64) throws -> [StoredTrip] {
+    try storedTrips("WHERE trip_state.vehicle_id = ?", [.integer(vehicleId)])
+  }
+
+  public func reviewTrip(id: Int64, action: String, effectiveMilliMiles: Int64?, vehicleId: Int64?, now: Int64) throws -> StoredTrip {
+    guard ["confirm", "correct", "reassign", "reject"].contains(action) else { throw LocalStoreError.invalidTrip }
+    try transaction {
+      guard let state = try queryOne("SELECT vehicle_id, effective_milli_miles FROM trip_state WHERE trip_id = ?", [.integer(id)]) else { throw LocalStoreError.invalidTrip }
+      var nextVehicleId = state[0]
+      let hasNoEffectiveDistance = try queryOne("SELECT effective_milli_miles IS NULL FROM trip_state WHERE trip_id = ?", [.integer(id)])?[0] == 1
+      var nextEffective: Int64? = hasNoEffectiveDistance ? nil : state[1]
+      var disposition = "review_required"
+      let revisionAction = action == "correct" ? "corrected" : action == "reassign" ? "reassigned" : action == "reject" ? "rejected" : "confirmed"
+      if action == "reject" {
+        disposition = "rejected"
+        nextEffective = nil
+      } else if action == "reassign" {
+        guard let vehicleId, try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else { throw LocalStoreError.invalidTrip }
+        nextVehicleId = vehicleId
+        disposition = nextEffective == nil ? "review_required" : "confirmed"
+      } else {
+        if let effectiveMilliMiles { guard effectiveMilliMiles > 0 else { throw LocalStoreError.invalidTrip }; nextEffective = effectiveMilliMiles }
+        guard let nextEffective, nextEffective > 0 else { throw LocalStoreError.invalidTrip }
+        disposition = "confirmed"
+      }
+      let revision = try scalarInt64("SELECT COALESCE(MAX(revision_number), 0) + 1 FROM trip_revision WHERE trip_id = ?", [.integer(id)])
+      try run("UPDATE trip_state SET vehicle_id = ?, effective_milli_miles = ?, disposition = ?, updated_at = ? WHERE trip_id = ?", [.integer(nextVehicleId), nextEffective.map(Binding.integer) ?? .null, .text(disposition), .integer(now), .integer(id)])
+      try run("INSERT INTO trip_revision (trip_id, revision_number, occurred_at, actor, action, vehicle_id, effective_milli_miles, disposition) VALUES (?, ?, ?, 'user', ?, ?, ?, ?)", [.integer(id), .integer(revision), .integer(now), .text(revisionAction), .integer(nextVehicleId), nextEffective.map(Binding.integer) ?? .null, .text(disposition)])
+    }
+    guard let trip = try storedTrips("WHERE trip.id = ?", [.integer(id)]).first else { throw LocalStoreError.invalidTrip }
+    return trip
   }
 
   public func reconcilePhotoFiles(in directoryURL: URL) throws {
@@ -695,6 +748,26 @@ public final class LocalStore: @unchecked Sendable {
     case SQLITE_DONE: return nil
     default: throw failure(database)
     }
+  }
+
+  private func storedTrips(_ clause: String, _ values: [Binding]) throws -> [StoredTrip] {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    let sql = "SELECT trip.id, trip_state.vehicle_id, trip.started_at, trip.ended_at, trip.captured_milli_miles, trip_state.effective_milli_miles, trip_state.disposition, trip.failure_reason FROM trip JOIN trip_state ON trip_state.trip_id = trip.id \(clause) ORDER BY trip.ended_at DESC, trip.id DESC"
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw failure(database) }
+    defer { sqlite3_finalize(statement) }
+    try bind(values, to: statement)
+    var trips: [StoredTrip] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      guard let disposition = sqlite3_column_text(statement, 6) else { throw LocalStoreError.sqlite("Trip state was missing disposition") }
+      trips.append(StoredTrip(
+        id: sqlite3_column_int64(statement, 0), vehicleId: sqlite3_column_type(statement, 1) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 1),
+        startedAt: sqlite3_column_int64(statement, 2), endedAt: sqlite3_column_int64(statement, 3),
+        capturedMilliMiles: sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 4),
+        effectiveMilliMiles: sqlite3_column_type(statement, 5) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 5),
+        disposition: String(cString: disposition), failureReason: sqlite3_column_type(statement, 7) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(statement, 7)!)))
+    }
+    return trips
   }
 
   private func photoAssets() throws -> [(id: Int64, filename: String)] {

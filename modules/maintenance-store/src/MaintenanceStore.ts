@@ -113,6 +113,24 @@ export type TrackingSnapshot = Readonly<{
   state: 'idle' | 'tracking' | 'recovering';
 }>;
 
+export type Trip = Readonly<{
+  id: string;
+  vehicleId?: string;
+  startedAt: string;
+  endedAt: string;
+  capturedMilliMiles?: string;
+  effectiveMilliMiles?: string;
+  disposition: 'review_required' | 'confirmed' | 'rejected' | 'failed';
+  failureReason?: string;
+}>;
+
+export type ReviewTripInput = Readonly<{
+  tripId: string;
+  action: 'confirm' | 'correct' | 'reassign' | 'reject';
+  effectiveMilliMiles?: string;
+  vehicleId?: string;
+}>;
+
 export interface NativeMaintenanceStore {
   getBootstrap(): Promise<Bootstrap>;
   getRecoveryState(): Promise<RecoveryState>;
@@ -129,6 +147,8 @@ export interface NativeMaintenanceStore {
   getTrackingSnapshot(): Promise<TrackingSnapshot>;
   startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
   stopTracking(): Promise<TrackingSnapshot>;
+  getTrips?(vehicleId: string): Promise<Trip[]>;
+  reviewTrip?(tripId: string, action: ReviewTripInput['action'], effectiveMilliMiles?: string, vehicleId?: string): Promise<Trip>;
   getArchivedVehicles(): Promise<GarageVehicle[]>;
   updateVehicle(id: string, nickname: string, year: number, make: string, model: string): Promise<Vehicle>;
   archiveVehicle(vehicleId: string): Promise<void>;
@@ -179,6 +199,8 @@ export type MaintenanceStore = Readonly<{
     getSnapshot(): Promise<TrackingSnapshot>;
     start(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
     stop(): Promise<TrackingSnapshot>;
+    getTrips(vehicleId: string): Promise<Trip[]>;
+    review(input: ReviewTripInput): Promise<Trip>;
   }>;
 }>;
 
@@ -278,6 +300,14 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
       getSnapshot: () => native.getTrackingSnapshot(),
       start: (vehicleId, source) => native.startTracking(vehicleId, source),
       stop: () => native.stopTracking(),
+      getTrips: (vehicleId) => {
+        if (typeof native.getTrips !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to review trips.'));
+        return native.getTrips(vehicleId);
+      },
+      review: (input) => {
+        if (typeof native.reviewTrip !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to review trips.'));
+        return native.reviewTrip(input.tripId, input.action, input.effectiveMilliMiles, input.vehicleId);
+      },
     },
   };
 }

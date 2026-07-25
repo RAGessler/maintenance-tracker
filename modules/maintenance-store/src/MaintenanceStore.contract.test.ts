@@ -116,7 +116,33 @@ test('trip-tracking forwards only typed foundation commands', async () => {
   assert.deepEqual(await store.tracking.start('7', 'automatic'), { state: 'tracking' });
   assert.deepEqual(await store.tracking.stop(), { state: 'idle' });
   assert.deepEqual(calls, [['7', 'automatic'], []]);
-  assert.deepEqual(Object.keys(store.tracking).sort(), ['getSnapshot', 'start', 'stop']);
+  assert.deepEqual(Object.keys(store.tracking).sort(), ['getSnapshot', 'getTrips', 'review', 'start', 'stop']);
+});
+
+test('trip-tracking exposes reviewed manual trips without persistence internals', async () => {
+  const calls: unknown[][] = [];
+  const native = {
+    getBootstrap: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 2 }),
+    getRecoveryState: async () => ({ state: 'ready' as const }),
+    acceptDisclosure: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 2 }),
+    deleteAllData: async () => ({ disclosureAccepted: false, disclosureVersion: 0, schemaVersion: 2 }),
+    createVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    getVehicles: async () => [], getArchivedVehicles: async () => [],
+    updateVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    archiveVehicle: async () => {}, restoreVehicle: async () => {},
+    getTrackingSnapshot: async () => ({ state: 'idle' as const }),
+    startTracking: async () => ({ state: 'tracking' as const }), stopTracking: async () => ({ state: 'idle' as const }),
+    getTrips: async (...args: unknown[]) => { calls.push(['list', ...args]); return []; },
+    reviewTrip: async (...args: unknown[]) => { calls.push(['review', ...args]); return { id: '9', vehicleId: '7', disposition: 'confirmed', effectiveMilliMiles: '1234' }; },
+  } as unknown as NativeMaintenanceStore;
+
+  const tracking = createMaintenanceStore(native).tracking;
+  await tracking.getTrips('7');
+  await tracking.review({ tripId: '9', action: 'confirm' });
+
+  assert.deepEqual(calls, [
+    ['list', '7'], ['review', '9', 'confirm', undefined, undefined],
+  ]);
 });
 
 test('product-store exposes recovery and reset without exposing the failed store', async () => {

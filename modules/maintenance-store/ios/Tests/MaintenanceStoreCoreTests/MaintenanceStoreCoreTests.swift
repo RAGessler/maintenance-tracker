@@ -131,6 +131,62 @@ func clearsTemporaryTrackingState() throws {
   #expect(try store.trackingState() == "idle")
 }
 
+@Test("manual stops retain a review candidate and corrections are append-only odometer facts")
+func reviewsManualTripWithoutRetainingTrackingAnchors() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let first = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 42_000_000, now: 2)
+  let second = try store.createVehicle(nickname: "Weekend", year: 2021, make: "Honda", model: "Fit", initialOdometerMilliMiles: 10_000_000, now: 2)
+
+  try store.startTracking(vehicleId: first.id, source: "manual", now: 3)
+  try store.stopTracking(now: 4)
+  let candidate = try #require(store.trips(for: first.id).first)
+  #expect(candidate.disposition == "review_required")
+  #expect(candidate.effectiveMilliMiles == nil)
+  #expect(candidate.failureReason == "movement_not_confirmed")
+
+  let corrected = try store.reviewTrip(id: candidate.id, action: "correct", effectiveMilliMiles: 1_234, vehicleId: nil, now: 5)
+  #expect(corrected.disposition == "confirmed")
+  #expect(corrected.effectiveMilliMiles == 1_234)
+  let reassigned = try store.reviewTrip(id: candidate.id, action: "reassign", effectiveMilliMiles: nil, vehicleId: second.id, now: 6)
+  #expect(reassigned.vehicleId == second.id)
+  #expect(try store.confirmedTripDistances(for: first.id).isEmpty)
+  #expect(try store.confirmedTripDistances(for: second.id).map(\.effectiveMilliMiles) == [1_234])
+  let rejected = try store.reviewTrip(id: candidate.id, action: "reject", effectiveMilliMiles: nil, vehicleId: nil, now: 7)
+  #expect(rejected.disposition == "rejected")
+  #expect(rejected.effectiveMilliMiles == nil)
+  #expect(try store.confirmedTripDistances(for: second.id).isEmpty)
+
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+  #expect(try scalar(database, "SELECT COUNT(*) FROM trip_revision WHERE trip_id = \(candidate.id)") == 4)
+  #expect(try scalar(database, "SELECT COUNT(*) FROM tracking_session") == 0)
+}
+
+@Test("manual stops confirm observed movement with usable cumulative distance")
+func confirmsManualTripWithUsableDistance() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 42_000_000, now: 2)
+  try store.startTracking(vehicleId: vehicle.id, source: "manual", now: 3)
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+  #expect(execute(database, "UPDATE tracking_session SET movement_observed = 1, cumulative_milli_miles = 1_234 WHERE id = 1") == SQLITE_OK)
+
+  try store.stopTracking(now: 4)
+  let trip = try #require(store.trips(for: vehicle.id).first)
+  #expect(trip.disposition == "confirmed")
+  #expect(trip.capturedMilliMiles == 1_234)
+  #expect(trip.effectiveMilliMiles == 1_234)
+  #expect(try store.confirmedTripDistances(for: vehicle.id).map(\.effectiveMilliMiles) == [1_234])
+}
+
 @Test("a competing vehicle cannot replace an active tracking session")
 func rejectsCompetingTrackingStart() throws {
   let store = try LocalStore(path: ":memory:")
