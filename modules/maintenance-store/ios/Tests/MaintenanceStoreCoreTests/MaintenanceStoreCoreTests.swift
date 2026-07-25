@@ -19,6 +19,35 @@ func createsVehicleAndInitialReading() throws {
   #expect(try store.latestManualOdometer(for: vehicle.id)?.milliMiles == 42_125_000)
 }
 
+@Test("concurrent vehicle creation returns each vehicle's generated identifier")
+func returnsVehicleIdentifierFromItsTransaction() async throws {
+  let store = try LocalStore(path: ":memory:")
+  let vehicles = try await withThrowingTaskGroup(of: (StoredVehicle, Int64).self) { group in
+    for value in 0..<100 {
+      group.addTask {
+        let milliMiles = Int64(value)
+        return (
+          try store.createVehicle(
+            nickname: "Vehicle \(value)", year: 2020, make: "Honda", model: "Civic",
+            initialOdometerMilliMiles: milliMiles, now: 1
+          ),
+          milliMiles
+        )
+      }
+    }
+
+    var results: [(StoredVehicle, Int64)] = []
+    for try await result in group {
+      results.append(result)
+    }
+    return results
+  }
+
+  for (vehicle, milliMiles) in vehicles {
+    #expect(try store.latestManualOdometer(for: vehicle.id)?.milliMiles == milliMiles)
+  }
+}
+
 @Test("tracking state is temporary and is cleared when a session stops")
 func clearsTemporaryTrackingState() throws {
   let store = try LocalStore(path: ":memory:")

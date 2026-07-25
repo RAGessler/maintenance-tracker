@@ -20,7 +20,7 @@ export type Bootstrap = Readonly<{
 }>;
 
 export type TrackingSnapshot = Readonly<{
-  state: 'idle' | 'tracking';
+  state: 'idle' | 'tracking' | 'recovering';
 }>;
 
 export interface NativeMaintenanceStore {

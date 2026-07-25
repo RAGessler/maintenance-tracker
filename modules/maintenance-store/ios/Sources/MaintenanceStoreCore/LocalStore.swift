@@ -70,6 +70,7 @@ public final class LocalStore: @unchecked Sendable {
       throw LocalStoreError.invalidVehicle
     }
 
+    var createdVehicleId: Int64?
     try transaction {
       let vehicleId = try insert(
         """
@@ -85,14 +86,12 @@ public final class LocalStore: @unchecked Sendable {
         """,
         [.integer(vehicleId), .integer(now), .integer(initialOdometerMilliMiles), .integer(now)]
       )
+      createdVehicleId = vehicleId
     }
 
-    let id = sqlite3_last_insert_rowid(database)
-    // The odometer insert is last; fetch the vehicle ID from the reading rather than exposing SQL to callers.
-    let vehicleId = try scalarInt64(
-      "SELECT vehicle_id FROM manual_odometer_reading WHERE id = ?",
-      [.integer(id)]
-    )
+    guard let vehicleId = createdVehicleId else {
+      throw LocalStoreError.sqlite("Vehicle transaction did not return an identifier")
+    }
     return StoredVehicle(id: vehicleId, nickname: normalizedNickname, year: year, make: normalizedMake, model: normalizedModel)
   }
 
@@ -133,12 +132,22 @@ public final class LocalStore: @unchecked Sendable {
 
   public func trackingState() throws -> String {
     guard let row = try queryOne(
-      "SELECT CASE WHEN lifecycle_state = 'tracking' THEN 1 ELSE 0 END FROM tracking_session WHERE id = 1",
+      """
+      SELECT CASE lifecycle_state
+        WHEN 'tracking' THEN 2
+        WHEN 'recovering' THEN 1
+        ELSE 0
+      END FROM tracking_session WHERE id = 1
+      """,
       []
     ) else {
       return "idle"
     }
-    return row[0] == 1 ? "tracking" : "idle"
+    switch row[0] {
+    case 2: return "tracking"
+    case 1: return "recovering"
+    default: return "idle"
+    }
   }
 
   public func startTracking(vehicleId: Int64, source: String, now: Int64) throws {

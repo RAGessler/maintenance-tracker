@@ -12,9 +12,9 @@ declare class MaintenanceStoreModule extends NativeModule<{}> implements NativeM
     model: string,
     initialOdometerMilliMiles: string,
   ): Promise<{ id: string; nickname: string; year: number; make: string; model: string }>;
-  getTrackingSnapshot(): Promise<{ state: 'idle' | 'tracking' }>;
-  startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<{ state: 'idle' | 'tracking' }>;
-  stopTracking(): Promise<{ state: 'idle' | 'tracking' }>;
+  getTrackingSnapshot(): Promise<{ state: 'idle' | 'tracking' | 'recovering' }>;
+  startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<{ state: 'idle' | 'tracking' | 'recovering' }>;
+  stopTracking(): Promise<{ state: 'idle' | 'tracking' | 'recovering' }>;
 }
 
 const nativeMaintenanceStore = requireNativeModule<MaintenanceStoreModule>('MaintenanceStore');
