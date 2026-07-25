@@ -8,6 +8,7 @@ declare class MaintenanceStoreModule extends NativeModule<{}> implements NativeM
   acceptDisclosure(version: number): Promise<Bootstrap>;
   deleteAllData(): Promise<Bootstrap>;
   getVehicles(): Promise<GarageVehicle[]>;
+  getArchivedVehicles(): Promise<GarageVehicle[]>;
   createVehicle(
     nickname: string,
     year: number,
@@ -15,6 +16,9 @@ declare class MaintenanceStoreModule extends NativeModule<{}> implements NativeM
     model: string,
     initialOdometerMilliMiles: string,
   ): Promise<Vehicle>;
+  updateVehicle(id: string, nickname: string, year: number, make: string, model: string): Promise<Vehicle>;
+  archiveVehicle(vehicleId: string): Promise<void>;
+  restoreVehicle(vehicleId: string): Promise<void>;
   getTrackingSnapshot(): Promise<TrackingSnapshot>;
   startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
   stopTracking(): Promise<TrackingSnapshot>;

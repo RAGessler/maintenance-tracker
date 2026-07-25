@@ -14,6 +14,14 @@ export type CreateVehicleInput = Readonly<{
   initialOdometerMilliMiles: string;
 }>;
 
+export type UpdateVehicleInput = Readonly<{
+  id: string;
+  nickname: string;
+  year: number;
+  make: string;
+  model: string;
+}>;
+
 export type Bootstrap = Readonly<{
   disclosureAccepted: boolean;
   disclosureVersion: number;
@@ -29,6 +37,8 @@ export type RecoveryState = Readonly<{
 
 export type GarageVehicle = Vehicle & Readonly<{
   currentOdometerMilliMiles: string;
+  scheduleCount: number;
+  trackingReadiness: 'manual_only' | 'automatic_setup';
 }>;
 
 export type TrackingSnapshot = Readonly<{
@@ -51,6 +61,10 @@ export interface NativeMaintenanceStore {
   getTrackingSnapshot(): Promise<TrackingSnapshot>;
   startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
   stopTracking(): Promise<TrackingSnapshot>;
+  getArchivedVehicles(): Promise<GarageVehicle[]>;
+  updateVehicle(id: string, nickname: string, year: number, make: string, model: string): Promise<Vehicle>;
+  archiveVehicle(vehicleId: string): Promise<void>;
+  restoreVehicle(vehicleId: string): Promise<void>;
 }
 
 export type MaintenanceStore = Readonly<{
@@ -60,7 +74,11 @@ export type MaintenanceStore = Readonly<{
     acceptDisclosure(version: number): Promise<Bootstrap>;
     deleteAllData(): Promise<Bootstrap>;
     getVehicles(): Promise<GarageVehicle[]>;
+    getArchivedVehicles(): Promise<GarageVehicle[]>;
     createVehicle(input: CreateVehicleInput): Promise<Vehicle>;
+    updateVehicle(input: UpdateVehicleInput): Promise<Vehicle>;
+    archiveVehicle(vehicleId: string): Promise<void>;
+    restoreVehicle(vehicleId: string): Promise<void>;
   }>;
   tracking: Readonly<{
     getSnapshot(): Promise<TrackingSnapshot>;
@@ -82,6 +100,12 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
         }
         return native.getVehicles();
       },
+      getArchivedVehicles: () => {
+        if (typeof native.getArchivedVehicles !== 'function') {
+          return Promise.reject(new Error('Rebuild the iOS development client to load archived vehicles.'));
+        }
+        return native.getArchivedVehicles();
+      },
       createVehicle: (input) =>
         native.createVehicle(
           input.nickname,
@@ -90,6 +114,9 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
           input.model,
           input.initialOdometerMilliMiles,
         ),
+      updateVehicle: (input) => native.updateVehicle(input.id, input.nickname, input.year, input.make, input.model),
+      archiveVehicle: (vehicleId) => native.archiveVehicle(vehicleId),
+      restoreVehicle: (vehicleId) => native.restoreVehicle(vehicleId),
     },
     tracking: {
       getSnapshot: () => native.getTrackingSnapshot(),

@@ -24,6 +24,8 @@ public struct StoredGarageVehicle: Sendable, Equatable {
   public let make: String
   public let model: String
   public let currentOdometerMilliMiles: Int64
+  public let scheduleCount: Int
+  public let trackingReadiness: String
 }
 
 public struct ManualOdometerReading: Sendable, Equatable {
@@ -80,14 +82,8 @@ public final class LocalStore: @unchecked Sendable {
     initialOdometerMilliMiles: Int64,
     now: Int64
   ) throws -> StoredVehicle {
-    let normalizedNickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-    let normalizedMake = make.trimmingCharacters(in: .whitespacesAndNewlines)
-    let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !normalizedNickname.isEmpty,
-          !normalizedMake.isEmpty,
-          !normalizedModel.isEmpty,
-          year >= 1886,
-          initialOdometerMilliMiles >= 0 else {
+    let (normalizedNickname, normalizedMake, normalizedModel) = try normalizedVehicleFields(nickname: nickname, year: year, make: make, model: model)
+    guard initialOdometerMilliMiles >= 0 else {
       throw LocalStoreError.invalidVehicle
     }
 
@@ -117,6 +113,32 @@ public final class LocalStore: @unchecked Sendable {
     return StoredVehicle(id: vehicleId, nickname: normalizedNickname, year: year, make: normalizedMake, model: normalizedModel)
   }
 
+  public func updateVehicle(id: Int64, nickname: String, year: Int, make: String, model: String, now: Int64) throws -> StoredVehicle {
+    let (normalizedNickname, normalizedMake, normalizedModel) = try normalizedVehicleFields(nickname: nickname, year: year, make: make, model: model)
+    try transaction {
+      guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(id)]) != nil else { throw LocalStoreError.invalidVehicle }
+      try run("UPDATE vehicle SET nickname = ?, year = ?, make = ?, model = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL", [.text(normalizedNickname), .integer(Int64(year)), .text(normalizedMake), .text(normalizedModel), .integer(now), .integer(id)])
+    }
+    return StoredVehicle(id: id, nickname: normalizedNickname, year: year, make: normalizedMake, model: normalizedModel)
+  }
+
+  public func archiveVehicle(id: Int64, now: Int64) throws {
+    try transaction {
+      guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(id)]) != nil else { throw LocalStoreError.invalidVehicle }
+      if try queryOne("SELECT intended_vehicle_id FROM tracking_session WHERE id = 1 AND intended_vehicle_id = ? AND lifecycle_state IN ('tracking', 'recovering')", [.integer(id)]) != nil { throw LocalStoreError.trackingConflict }
+      try run("DELETE FROM trigger_configuration WHERE vehicle_id = ?", [.integer(id)])
+      try run("DELETE FROM route_binding WHERE vehicle_id = ?", [.integer(id)])
+      try run("UPDATE vehicle SET archived_at = ?, updated_at = ? WHERE id = ?", [.integer(now), .integer(now), .integer(id)])
+    }
+  }
+
+  public func restoreVehicle(id: Int64, now: Int64) throws {
+    try transaction {
+      guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NOT NULL", [.integer(id)]) != nil else { throw LocalStoreError.invalidVehicle }
+      try run("UPDATE vehicle SET archived_at = NULL, updated_at = ? WHERE id = ?", [.integer(now), .integer(id)])
+    }
+  }
+
   public func latestManualOdometer(for vehicleId: Int64) throws -> ManualOdometerReading? {
     guard let row = try queryOne(
       """
@@ -130,10 +152,10 @@ public final class LocalStore: @unchecked Sendable {
     return ManualOdometerReading(milliMiles: row[0], effectiveAt: row[1])
   }
 
-  public func vehicles() throws -> [StoredGarageVehicle] {
+  public func vehicles(archived: Bool = false) throws -> [StoredGarageVehicle] {
     guard let database else { throw LocalStoreError.sqlite("Store is closed") }
     var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(database, garageVehiclesQuery, -1, &statement, nil) == SQLITE_OK, let statement else {
+    guard sqlite3_prepare_v2(database, archived ? archivedGarageVehiclesQuery : garageVehiclesQuery, -1, &statement, nil) == SQLITE_OK, let statement else {
       throw failure(database)
     }
     defer { sqlite3_finalize(statement) }
@@ -145,7 +167,8 @@ public final class LocalStore: @unchecked Sendable {
       guard result == SQLITE_ROW else { throw failure(database) }
       guard let nickname = sqlite3_column_text(statement, 1),
             let make = sqlite3_column_text(statement, 3),
-            let model = sqlite3_column_text(statement, 4) else {
+            let model = sqlite3_column_text(statement, 4),
+            let trackingReadiness = sqlite3_column_text(statement, 7) else {
         throw LocalStoreError.sqlite("Vehicle row was missing required text")
       }
       vehicles.append(StoredGarageVehicle(
@@ -154,7 +177,9 @@ public final class LocalStore: @unchecked Sendable {
         year: Int(sqlite3_column_int64(statement, 2)),
         make: String(cString: make),
         model: String(cString: model),
-        currentOdometerMilliMiles: sqlite3_column_int64(statement, 5)
+        currentOdometerMilliMiles: sqlite3_column_int64(statement, 5),
+        scheduleCount: Int(sqlite3_column_int64(statement, 6)),
+        trackingReadiness: String(cString: trackingReadiness)
       ))
     }
     return vehicles
@@ -311,6 +336,14 @@ public final class LocalStore: @unchecked Sendable {
     }
   }
 
+  private func normalizedVehicleFields(nickname: String, year: Int, make: String, model: String) throws -> (String, String, String) {
+    let normalizedNickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+    let normalizedMake = make.trimmingCharacters(in: .whitespacesAndNewlines)
+    let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalizedNickname.isEmpty, !normalizedMake.isEmpty, !normalizedModel.isEmpty, year >= 1886 else { throw LocalStoreError.invalidVehicle }
+    return (normalizedNickname, normalizedMake, normalizedModel)
+  }
+
   private func transactionLocked(_ body: () throws -> Void) throws {
     try execute("BEGIN IMMEDIATE")
     do {
@@ -442,13 +475,28 @@ public final class LocalStore: @unchecked Sendable {
 }
 
 let garageVehiclesQuery = """
-  SELECT vehicle.id, vehicle.nickname, vehicle.year, vehicle.make, vehicle.model, manual_odometer_reading.milli_miles
+  SELECT vehicle.id, vehicle.nickname, vehicle.year, vehicle.make, vehicle.model, manual_odometer_reading.milli_miles,
+    (SELECT COUNT(*) FROM maintenance_schedule WHERE vehicle_id = vehicle.id),
+    CASE WHEN EXISTS (SELECT 1 FROM trigger_configuration WHERE vehicle_id = vehicle.id) THEN 'automatic_setup' ELSE 'manual_only' END
   FROM vehicle
   JOIN manual_odometer_reading ON manual_odometer_reading.id = (
     SELECT id FROM manual_odometer_reading
     WHERE vehicle_id = vehicle.id ORDER BY effective_at DESC, id DESC LIMIT 1
   )
   WHERE vehicle.archived_at IS NULL
+  ORDER BY vehicle.nickname COLLATE NOCASE, vehicle.id
+  """
+
+let archivedGarageVehiclesQuery = """
+  SELECT vehicle.id, vehicle.nickname, vehicle.year, vehicle.make, vehicle.model, manual_odometer_reading.milli_miles,
+    (SELECT COUNT(*) FROM maintenance_schedule WHERE vehicle_id = vehicle.id),
+    CASE WHEN EXISTS (SELECT 1 FROM trigger_configuration WHERE vehicle_id = vehicle.id) THEN 'automatic_setup' ELSE 'manual_only' END
+  FROM vehicle
+  JOIN manual_odometer_reading ON manual_odometer_reading.id = (
+    SELECT id FROM manual_odometer_reading
+    WHERE vehicle_id = vehicle.id ORDER BY effective_at DESC, id DESC LIMIT 1
+  )
+  WHERE vehicle.archived_at IS NOT NULL
   ORDER BY vehicle.nickname COLLATE NOCASE, vehicle.id
   """
 

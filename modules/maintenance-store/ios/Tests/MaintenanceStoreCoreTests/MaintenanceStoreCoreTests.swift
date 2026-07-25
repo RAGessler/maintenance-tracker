@@ -144,6 +144,68 @@ func rejectsCompetingTrackingStart() throws {
   }
 }
 
+@Test("archiving removes tracking setup, retains history, and restores without setup")
+func archivesAndRestoresVehicleSafely() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 42_000_000, now: 2)
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+  #expect(execute(database, "INSERT INTO trigger_configuration (vehicle_id, mode, created_at, updated_at) VALUES (\(vehicle.id), 'bluetooth_shortcut', 3, 3)") == SQLITE_OK)
+  #expect(execute(database, "INSERT INTO route_binding (vehicle_id, kind, opaque_value, created_at) VALUES (\(vehicle.id), 'bluetooth_route', 'route-1', 3)") == SQLITE_OK)
+
+  try store.archiveVehicle(id: vehicle.id, now: 4)
+  #expect(try store.vehicles().isEmpty)
+  #expect(try store.vehicles(archived: true).map(\.nickname) == ["Daily"])
+  #expect(try scalar(database, "SELECT COUNT(*) FROM trigger_configuration WHERE vehicle_id = \(vehicle.id)") == 0)
+  #expect(try scalar(database, "SELECT COUNT(*) FROM route_binding WHERE vehicle_id = \(vehicle.id)") == 0)
+  #expect(try store.latestManualOdometer(for: vehicle.id)?.milliMiles == 42_000_000)
+
+  try store.restoreVehicle(id: vehicle.id, now: 5)
+  #expect(try store.vehicles().map(\.nickname) == ["Daily"])
+  #expect(try scalar(database, "SELECT COUNT(*) FROM trigger_configuration WHERE vehicle_id = \(vehicle.id)") == 0)
+}
+
+@Test("archiving an actively tracked vehicle is blocked")
+func blocksArchiveDuringActiveTrip() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+  try store.startTracking(vehicleId: vehicle.id, source: "manual", now: 3)
+
+  #expect(throws: LocalStoreError.trackingConflict) {
+    try store.archiveVehicle(id: vehicle.id, now: 4)
+  }
+  #expect(try store.vehicles().map(\.nickname) == ["Daily"])
+}
+
+@Test("editing a vehicle persists identity fields without changing its odometer")
+func editsVehicleIdentity() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 42_000_000, now: 2)
+
+  let edited = try store.updateVehicle(id: vehicle.id, nickname: "Road car", year: 2021, make: "Mazda", model: "3", now: 3)
+  #expect(edited == StoredVehicle(id: vehicle.id, nickname: "Road car", year: 2021, make: "Mazda", model: "3"))
+  #expect(try store.vehicles().first?.nickname == "Road car")
+  #expect(try store.latestManualOdometer(for: vehicle.id)?.milliMiles == 42_000_000)
+}
+
+@Test("editing rejects invalid identity fields without partial changes")
+func rejectsInvalidVehicleEdit() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+
+  #expect(throws: LocalStoreError.invalidVehicle) {
+    try store.updateVehicle(id: vehicle.id, nickname: "", year: 2020, make: "Honda", model: "Civic", now: 3)
+  }
+  #expect(try store.vehicles().first?.nickname == "Daily")
+}
+
 @Test("the v1 schema accepts only approved durable trip codes")
 func constrainsPersistedTripCodes() throws {
   let directoryURL = FileManager.default.temporaryDirectory

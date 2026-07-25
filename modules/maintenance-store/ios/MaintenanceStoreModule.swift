@@ -46,16 +46,11 @@ public class MaintenanceStoreModule: Module {
     }
 
     AsyncFunction("getVehicles") { () throws -> [[String: Any]] in
-      try self.localStore().vehicles().map {
-        [
-          "id": String($0.id),
-          "nickname": $0.nickname,
-          "year": $0.year,
-          "make": $0.make,
-          "model": $0.model,
-          "currentOdometerMilliMiles": String($0.currentOdometerMilliMiles),
-        ]
-      }
+      try self.localStore().vehicles(archived: false).map(Self.vehicleDictionary)
+    }
+
+    AsyncFunction("getArchivedVehicles") { () throws -> [[String: Any]] in
+      try self.localStore().vehicles(archived: true).map(Self.vehicleDictionary)
     }
 
     AsyncFunction("createVehicle") {
@@ -75,6 +70,25 @@ public class MaintenanceStoreModule: Module {
         now: Self.now()
       )
       return ["id": String(vehicle.id), "nickname": vehicle.nickname, "year": vehicle.year, "make": vehicle.make, "model": vehicle.model]
+    }
+
+    AsyncFunction("updateVehicle") {
+      (vehicleId: String, nickname: String, year: Int, make: String, model: String) throws -> [String: Any] in
+      guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidVehicle }
+      let vehicle = try self.localStore().updateVehicle(
+        id: nativeVehicleId, nickname: nickname, year: year, make: make, model: model, now: Self.now()
+      )
+      return ["id": String(vehicle.id), "nickname": vehicle.nickname, "year": vehicle.year, "make": vehicle.make, "model": vehicle.model]
+    }
+
+    AsyncFunction("archiveVehicle") { (vehicleId: String) throws -> Void in
+      guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidVehicle }
+      try self.localStore().archiveVehicle(id: nativeVehicleId, now: Self.now())
+    }
+
+    AsyncFunction("restoreVehicle") { (vehicleId: String) throws -> Void in
+      guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidVehicle }
+      try self.localStore().restoreVehicle(id: nativeVehicleId, now: Self.now())
     }
 
     AsyncFunction("getTrackingSnapshot") { () throws -> [String: String] in
@@ -132,5 +146,18 @@ public class MaintenanceStoreModule: Module {
 
   private static func now() -> Int64 {
     Int64(Date().timeIntervalSince1970 * 1_000)
+  }
+
+  private static func vehicleDictionary(_ vehicle: StoredGarageVehicle) -> [String: Any] {
+    [
+      "id": String(vehicle.id),
+      "nickname": vehicle.nickname,
+      "year": vehicle.year,
+      "make": vehicle.make,
+      "model": vehicle.model,
+      "currentOdometerMilliMiles": String(vehicle.currentOdometerMilliMiles),
+      "scheduleCount": vehicle.scheduleCount,
+      "trackingReadiness": vehicle.trackingReadiness,
+    ]
   }
 }

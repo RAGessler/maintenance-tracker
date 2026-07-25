@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, type Href } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -14,6 +14,7 @@ const emptyDraft: Draft = { nickname: '', year: '', make: '', model: '', odomete
 
 export function GarageScreen() {
   const [vehicles, setVehicles] = useState<GarageVehicle[]>([]);
+  const [archivedVehicles, setArchivedVehicles] = useState<GarageVehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -21,13 +22,13 @@ export function GarageScreen() {
   const loadVehicles = () => {
     setLoading(true);
     setLoadError(null);
-    maintenanceStore.product.getVehicles().then(setVehicles).catch((error: unknown) => setLoadError(error instanceof Error ? error.message : 'Vehicles could not be loaded.')).finally(() => setLoading(false));
+    loadGarageVehicles().then(([active, archived]) => { setVehicles(active); setArchivedVehicles(archived); }).catch((error: unknown) => setLoadError(error instanceof Error ? error.message : 'Vehicles could not be loaded.')).finally(() => setLoading(false));
   };
 
   useEffect(() => {
     let active = true;
-    maintenanceStore.product.getVehicles()
-      .then((loadedVehicles) => { if (active) setVehicles(loadedVehicles); })
+    loadGarageVehicles()
+      .then(([loadedVehicles, loadedArchivedVehicles]) => { if (active) { setVehicles(loadedVehicles); setArchivedVehicles(loadedArchivedVehicles); } })
       .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : 'Vehicles could not be loaded.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -47,15 +48,26 @@ export function GarageScreen() {
               <ThemedText accessibilityLiveRegion="polite">{loadError}</ThemedText>
               <ActionButton label="Try again" onPress={loadVehicles} />
             </View>
-          ) : vehicles.length === 0 ? (
+          ) : vehicles.length === 0 && archivedVehicles.length === 0 ? (
             <EmptyGarage onAdd={() => setAdding(true)} />
           ) : (
-            <VehicleList vehicles={vehicles} onAdd={() => setAdding(true)} />
+            <VehicleList vehicles={vehicles} archivedVehicles={archivedVehicles} onAdd={() => setAdding(true)} onChanged={loadVehicles} />
           )}
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
   );
+}
+
+async function loadGarageVehicles(): Promise<[GarageVehicle[], GarageVehicle[]]> {
+  const [active, archived] = await Promise.all([
+    maintenanceStore.product.getVehicles(),
+    maintenanceStore.product.getArchivedVehicles().catch((error: unknown) => {
+      if (error instanceof Error && error.message.includes('Rebuild the iOS development client')) return [];
+      throw error;
+    }),
+  ]);
+  return [active, archived];
 }
 
 function EmptyGarage({ onAdd }: Readonly<{ onAdd: () => void }>) {
@@ -72,18 +84,66 @@ function EmptyGarage({ onAdd }: Readonly<{ onAdd: () => void }>) {
   );
 }
 
-function VehicleList({ vehicles, onAdd }: Readonly<{ vehicles: GarageVehicle[]; onAdd: () => void }>) {
+function VehicleList({ vehicles, archivedVehicles, onAdd, onChanged }: Readonly<{ vehicles: GarageVehicle[]; archivedVehicles: GarageVehicle[]; onAdd: () => void; onChanged: () => void }>) {
   return (
     <View style={styles.list}>
       {vehicles.map((vehicle) => (
-        <ThemedView key={vehicle.id} style={styles.vehicleCard} accessibilityLabel={`${vehicle.nickname}, ${vehicle.year} ${vehicle.make} ${vehicle.model}, ${formatMiles(vehicle.currentOdometerMilliMiles)} mile manual odometer reading`}>
-          <View style={styles.vehicleHero}><SymbolView name={{ ios: 'car.side.fill', android: 'directions_car', web: 'directions_car' }} tintColor="#B9D8F7" size={54} /></View>
-          <View style={styles.vehicleDetails}><ThemedText style={styles.vehicleName}>{vehicle.nickname}</ThemedText><ThemedText style={styles.vehicleModel}>{vehicle.year} {vehicle.make} {vehicle.model}</ThemedText><ThemedText style={styles.vehicleMileage}>{formatMiles(vehicle.currentOdometerMilliMiles)} mi manual baseline</ThemedText></View>
-        </ThemedView>
+        <VehicleCard key={vehicle.id} vehicle={vehicle} onChanged={onChanged} />
       ))}
       <ActionButton label="Add another vehicle" onPress={onAdd} />
+      {archivedVehicles.length > 0 && <>
+        <ThemedText accessibilityRole="header" style={styles.sectionTitle}>Archived vehicles</ThemedText>
+        {archivedVehicles.map((vehicle) => <ArchivedVehicleCard key={vehicle.id} vehicle={vehicle} onChanged={onChanged} />)}
+      </>}
     </View>
   );
+}
+
+function VehicleCard({ vehicle, onChanged }: Readonly<{ vehicle: GarageVehicle; onChanged: () => void }>) {
+  const [editing, setEditing] = useState(false);
+  if (editing) return <VehicleEditor vehicle={vehicle} onCancel={() => setEditing(false)} onChanged={() => { setEditing(false); onChanged(); }} />;
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={`${vehicle.nickname}, ${vehicle.year} ${vehicle.make} ${vehicle.model}, ${formatMiles(vehicle.currentOdometerMilliMiles)} mile manual odometer reading`} onPress={() => setEditing(true)}>
+      <ThemedView style={styles.vehicleCard}>
+          <View style={styles.vehicleHero}><SymbolView name={{ ios: 'car.side.fill', android: 'directions_car', web: 'directions_car' }} tintColor="#B9D8F7" size={54} /></View>
+          <View style={styles.vehicleDetails}><ThemedText style={styles.vehicleName}>{vehicle.nickname}</ThemedText><ThemedText style={styles.vehicleModel}>{vehicle.year} {vehicle.make} {vehicle.model}</ThemedText><ThemedText style={styles.vehicleMileage}>{formatMiles(vehicle.currentOdometerMilliMiles)} mi estimated</ThemedText><ThemedText style={styles.vehicleMileage}>Due: {vehicle.scheduleCount === 0 ? 'No schedules yet' : `${vehicle.scheduleCount} schedules`}</ThemedText><ThemedText style={styles.vehicleMileage}>Tracking: {vehicle.trackingReadiness === 'automatic_setup' ? 'Automatic setup configured' : 'Manual only'}</ThemedText><ThemedText style={styles.vehicleMileage}>Hero photo: Not added</ThemedText></View>
+      </ThemedView>
+    </Pressable>
+  );
+}
+
+function ArchivedVehicleCard({ vehicle, onChanged }: Readonly<{ vehicle: GarageVehicle; onChanged: () => void }>) {
+  const restore = async () => {
+    try { await maintenanceStore.product.restoreVehicle(vehicle.id); onChanged(); }
+    catch { Alert.alert('Could not restore vehicle', 'The vehicle remains archived. Try again.'); }
+  };
+  return <ThemedView style={styles.archivedCard}><View style={styles.archivedDetails}><ThemedText style={styles.vehicleName}>{vehicle.nickname}</ThemedText><ThemedText style={styles.vehicleModel}>{vehicle.year} {vehicle.make} {vehicle.model}</ThemedText><ThemedText style={styles.vehicleMileage}>Archived · tracking setup removed</ThemedText></View><ActionButton label="Restore" onPress={restore} /></ThemedView>;
+}
+
+function VehicleEditor({ vehicle, onCancel, onChanged }: Readonly<{ vehicle: GarageVehicle; onCancel: () => void; onChanged: () => void }>) {
+  const [draft, setDraft] = useState({ nickname: vehicle.nickname, year: String(vehicle.year), make: vehicle.make, model: vehicle.model });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const valid = draft.nickname.trim() && draft.make.trim() && draft.model.trim() && Number.isInteger(Number(draft.year)) && Number(draft.year) >= 1886;
+  const save = async () => {
+    if (!valid) return;
+    setSaving(true); setError(null);
+    try { await maintenanceStore.product.updateVehicle({ id: vehicle.id, nickname: draft.nickname.trim(), year: Number(draft.year), make: draft.make.trim(), model: draft.model.trim() }); onChanged(); }
+    catch { setError('The profile could not be saved. Your changes are still here.'); }
+    finally { setSaving(false); }
+  };
+  const archive = () => Alert.alert('Archive this vehicle?', 'Its history stays available, but active tracking setup is removed. You can restore the profile later.', [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Archive', style: 'destructive', onPress: async () => { try { await maintenanceStore.product.archiveVehicle(vehicle.id); onChanged(); } catch { setError('This vehicle cannot be archived while a trip is active. Stop the trip first.'); } } },
+  ]);
+  return <ThemedView style={styles.screen}><SafeAreaView style={styles.safeArea}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <View style={styles.formNavigation}><Pressable accessibilityRole="button" onPress={onCancel}><ThemedText style={styles.navigationAction}>Cancel</ThemedText></Pressable><ThemedText accessibilityRole="header" style={styles.formTitle}>Vehicle profile</ThemedText><Pressable accessibilityRole="button" disabled={!valid || saving} onPress={save}><ThemedText style={[styles.navigationAction, (!valid || saving) && styles.disabled]}>Save</ThemedText></Pressable></View>
+    <ThemedText style={styles.formIntro}>Identity fields can be changed here. Odometer readings remain an auditable history and are updated separately.</ThemedText>
+    <View style={styles.fieldGroup}><Field label="Nickname" value={draft.nickname} onChangeText={(nickname) => setDraft({ ...draft, nickname })} /><Field label="Year" value={draft.year} onChangeText={(year) => setDraft({ ...draft, year })} keyboardType="number-pad" /><Field label="Make" value={draft.make} onChangeText={(make) => setDraft({ ...draft, make })} /><Field label="Model" value={draft.model} onChangeText={(model) => setDraft({ ...draft, model })} /></View>
+    <View style={styles.readOnlyRow}><ThemedText style={styles.fieldLabel}>Current manual odometer</ThemedText><ThemedText>{formatMiles(vehicle.currentOdometerMilliMiles)} mi</ThemedText></View>
+    {error && <ThemedText style={styles.error} accessibilityLiveRegion="polite">{error}</ThemedText>}
+    <ActionButton label="Archive vehicle" onPress={archive} />
+  </ScrollView></SafeAreaView></ThemedView>;
 }
 
 function VehicleForm({ onCancel, onCreated }: Readonly<{ onCancel: () => void; onCreated: (vehicle: GarageVehicle) => void }>) {
@@ -101,7 +161,7 @@ function VehicleForm({ onCancel, onCreated }: Readonly<{ onCancel: () => void; o
       const vehicle = await maintenanceStore.product.createVehicle({
         nickname: draft.nickname.trim(), year: Number(draft.year), make: draft.make.trim(), model: draft.model.trim(), initialOdometerMilliMiles: toMilliMiles(draft.odometer),
       });
-      onCreated({ ...vehicle, currentOdometerMilliMiles: toMilliMiles(draft.odometer) });
+       onCreated({ ...vehicle, currentOdometerMilliMiles: toMilliMiles(draft.odometer), scheduleCount: 0, trackingReadiness: 'manual_only' });
     } catch {
       setError('The vehicle could not be saved. Your information is still here. Try again.');
     } finally {
@@ -151,7 +211,7 @@ function formatMiles(milliMiles: string) { return (BigInt(milliMiles) / 1_000n).
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas }, safeArea: { flex: 1 }, content: { padding: Spacing.four, gap: Spacing.three }, pageTitle: { color: TorqueColors.text, fontSize: 34, lineHeight: 41, fontWeight: '700' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: Spacing.three, minHeight: 480 }, emptyIcon: { width: 84, height: 84, borderRadius: 42, backgroundColor: '#E5F1FF', alignItems: 'center', justifyContent: 'center' }, emptyTitle: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, emptyCopy: { color: TorqueColors.secondary, fontSize: 15, lineHeight: 21, textAlign: 'center', maxWidth: 300 }, list: { gap: Spacing.three },
-  vehicleCard: { borderRadius: 18, overflow: 'hidden', backgroundColor: TorqueColors.card }, vehicleHero: { height: 150, backgroundColor: '#E8F2FC', alignItems: 'center', justifyContent: 'center' }, vehicleDetails: { padding: Spacing.three, gap: Spacing.half }, vehicleName: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, vehicleModel: { color: TorqueColors.text, fontSize: 16 }, vehicleMileage: { color: TorqueColors.secondary, fontSize: 13 },
+  vehicleCard: { borderRadius: 18, overflow: 'hidden', backgroundColor: TorqueColors.card }, vehicleHero: { height: 150, backgroundColor: '#E8F2FC', alignItems: 'center', justifyContent: 'center' }, vehicleDetails: { padding: Spacing.three, gap: Spacing.half }, vehicleName: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, vehicleModel: { color: TorqueColors.text, fontSize: 16 }, vehicleMileage: { color: TorqueColors.secondary, fontSize: 13 }, sectionTitle: { color: TorqueColors.text, fontSize: 20, fontWeight: '700', marginTop: Spacing.two }, archivedCard: { borderRadius: 16, backgroundColor: TorqueColors.card, padding: Spacing.three, gap: Spacing.two }, archivedDetails: { gap: Spacing.half }, readOnlyRow: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, padding: Spacing.three, gap: Spacing.one },
   formNavigation: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, formTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700' }, navigationAction: { color: TorqueColors.primary, fontSize: 17 }, photoPanel: { height: 132, borderRadius: Spacing.three, borderWidth: 1, borderColor: TorqueColors.divider, backgroundColor: TorqueColors.card, alignItems: 'center', justifyContent: 'center', gap: Spacing.one }, photoTitle: { color: TorqueColors.primary, fontSize: 16, fontWeight: '600' }, photoDetail: { color: TorqueColors.secondary, fontSize: 13 }, formIntro: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 }, fieldGroup: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, paddingHorizontal: Spacing.three }, field: { gap: Spacing.one, paddingVertical: Spacing.two, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider }, fieldLabel: { color: TorqueColors.text, fontSize: 13, fontWeight: '600' },
   input: { minHeight: 30, paddingVertical: Spacing.one, fontSize: 17, color: TorqueColors.text }, action: { minHeight: 48, borderRadius: 12, backgroundColor: TorqueColors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.three }, actionText: { color: '#FFFFFF', fontWeight: '700' }, error: { color: TorqueColors.error }, disabled: { opacity: 0.45 },
 });

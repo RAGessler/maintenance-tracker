@@ -15,6 +15,10 @@ test('product-store creates a vehicle without exposing storage internals', async
       return { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' };
     },
     getVehicles: async () => [],
+    getArchivedVehicles: async () => [],
+    updateVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    archiveVehicle: async () => {},
+    restoreVehicle: async () => {},
     getTrackingSnapshot: async () => ({ state: 'idle' }),
     startTracking: async () => ({ state: 'tracking' }),
     stopTracking: async () => ({ state: 'idle' }),
@@ -31,7 +35,7 @@ test('product-store creates a vehicle without exposing storage internals', async
 
   assert.deepEqual(vehicle, { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' });
   assert.deepEqual(calls, [['Daily', 2020, 'Honda', 'Civic', '42125000']]);
-  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'createVehicle', 'deleteAllData', 'getBootstrap', 'getRecoveryState', 'getVehicles']);
+  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createVehicle', 'deleteAllData', 'getArchivedVehicles', 'getBootstrap', 'getRecoveryState', 'getVehicles', 'restoreVehicle', 'updateVehicle']);
 });
 
 test('product-store exposes first-run state and garage vehicles without exposing persistence details', async () => {
@@ -41,7 +45,11 @@ test('product-store exposes first-run state and garage vehicles without exposing
     acceptDisclosure: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 1 }),
     deleteAllData: async () => ({ disclosureAccepted: false, disclosureVersion: 0, schemaVersion: 1 }),
     createVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
-    getVehicles: async () => [{ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic', currentOdometerMilliMiles: '42125000' }],
+    getVehicles: async () => [{ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic', currentOdometerMilliMiles: '42125000', scheduleCount: 0, trackingReadiness: 'manual_only' }],
+    getArchivedVehicles: async () => [],
+    updateVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    archiveVehicle: async () => {},
+    restoreVehicle: async () => {},
     getTrackingSnapshot: async () => ({ state: 'idle' }),
     startTracking: async () => ({ state: 'tracking' }),
     stopTracking: async () => ({ state: 'idle' }),
@@ -55,9 +63,9 @@ test('product-store exposes first-run state and garage vehicles without exposing
     schemaVersion: 1,
   });
   assert.deepEqual(await store.product.getVehicles(), [
-    { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic', currentOdometerMilliMiles: '42125000' },
+    { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic', currentOdometerMilliMiles: '42125000', scheduleCount: 0, trackingReadiness: 'manual_only' },
   ]);
-  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'createVehicle', 'deleteAllData', 'getBootstrap', 'getRecoveryState', 'getVehicles']);
+  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createVehicle', 'deleteAllData', 'getArchivedVehicles', 'getBootstrap', 'getRecoveryState', 'getVehicles', 'restoreVehicle', 'updateVehicle']);
 });
 
 test('product-store reports when an installed development client lacks the garage bridge', async () => {
@@ -87,6 +95,10 @@ test('trip-tracking forwards only typed foundation commands', async () => {
     deleteAllData: async () => ({ disclosureAccepted: false, disclosureVersion: 0, schemaVersion: 1 }),
     createVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
     getVehicles: async () => [],
+    getArchivedVehicles: async () => [],
+    updateVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    archiveVehicle: async () => {},
+    restoreVehicle: async () => {},
     getTrackingSnapshot: async () => ({ state: 'recovering' }),
     startTracking: async (...args) => {
       calls.push(args);
@@ -113,6 +125,10 @@ test('product-store exposes recovery and reset without exposing the failed store
     acceptDisclosure: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 1 }),
     createVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
     getVehicles: async () => [],
+    getArchivedVehicles: async () => [],
+    updateVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    archiveVehicle: async () => {},
+    restoreVehicle: async () => {},
     getTrackingSnapshot: async () => ({ state: 'idle' as const }),
     startTracking: async () => ({ state: 'tracking' as const }),
     stopTracking: async () => ({ state: 'idle' as const }),
