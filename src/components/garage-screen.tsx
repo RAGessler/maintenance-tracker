@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, type Href } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { SymbolView } from 'expo-symbols';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Spacing, TorqueColors } from '@/constants/theme';
 import { maintenanceStore, type GarageVehicle } from '../../modules/maintenance-store';
 
 type Draft = Readonly<{ nickname: string; year: string; make: string; model: string; odometer: string }>;
@@ -40,7 +41,7 @@ export function GarageScreen() {
     <ThemedView style={styles.screen}>
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content}>
-          <ThemedText type="subtitle" accessibilityRole="header">Garage</ThemedText>
+          <ThemedText accessibilityRole="header" style={styles.pageTitle}>Garage</ThemedText>
           {loading ? <ThemedText>Loading vehicles...</ThemedText> : loadError ? (
             <View style={styles.empty}>
               <ThemedText accessibilityLiveRegion="polite">{loadError}</ThemedText>
@@ -60,8 +61,9 @@ export function GarageScreen() {
 function EmptyGarage({ onAdd }: Readonly<{ onAdd: () => void }>) {
   return (
     <View style={styles.empty}>
-      <ThemedText type="subtitle" accessibilityRole="header">No vehicles yet.</ThemedText>
-      <ThemedText themeColor="textSecondary">Add a vehicle to track maintenance and odometer readings. Automatic trip tracking is optional and set up later.</ThemedText>
+      <View style={styles.emptyIcon}><SymbolView name={{ ios: 'car.fill', android: 'directions_car', web: 'directions_car' }} tintColor={TorqueColors.primary} size={38} /></View>
+      <ThemedText accessibilityRole="header" style={styles.emptyTitle}>No vehicles yet</ThemedText>
+      <ThemedText style={styles.emptyCopy}>Add a vehicle to track maintenance and odometer readings. Automatic trip tracking is optional and set up later.</ThemedText>
       <ActionButton label="Add a vehicle" onPress={onAdd} />
       <Link href={'/settings' as Href} asChild>
         <Pressable accessibilityRole="link"><ThemedText type="linkPrimary">How this app stores your data</ThemedText></Pressable>
@@ -74,10 +76,9 @@ function VehicleList({ vehicles, onAdd }: Readonly<{ vehicles: GarageVehicle[]; 
   return (
     <View style={styles.list}>
       {vehicles.map((vehicle) => (
-        <ThemedView key={vehicle.id} type="backgroundElement" style={styles.vehicleCard} accessibilityLabel={`${vehicle.nickname}, ${vehicle.year} ${vehicle.make} ${vehicle.model}, ${formatMiles(vehicle.currentOdometerMilliMiles)} mile manual odometer reading`}>
-          <ThemedText type="subtitle">{vehicle.nickname}</ThemedText>
-          <ThemedText>{vehicle.year} {vehicle.make} {vehicle.model}</ThemedText>
-          <ThemedText themeColor="textSecondary">{formatMiles(vehicle.currentOdometerMilliMiles)} miles</ThemedText>
+        <ThemedView key={vehicle.id} style={styles.vehicleCard} accessibilityLabel={`${vehicle.nickname}, ${vehicle.year} ${vehicle.make} ${vehicle.model}, ${formatMiles(vehicle.currentOdometerMilliMiles)} mile manual odometer reading`}>
+          <View style={styles.vehicleHero}><SymbolView name={{ ios: 'car.side.fill', android: 'directions_car', web: 'directions_car' }} tintColor="#B9D8F7" size={54} /></View>
+          <View style={styles.vehicleDetails}><ThemedText style={styles.vehicleName}>{vehicle.nickname}</ThemedText><ThemedText style={styles.vehicleModel}>{vehicle.year} {vehicle.make} {vehicle.model}</ThemedText><ThemedText style={styles.vehicleMileage}>{formatMiles(vehicle.currentOdometerMilliMiles)} mi manual baseline</ThemedText></View>
         </ThemedView>
       ))}
       <ActionButton label="Add another vehicle" onPress={onAdd} />
@@ -112,16 +113,11 @@ function VehicleForm({ onCancel, onCreated }: Readonly<{ onCancel: () => void; o
     <ThemedView style={styles.screen}>
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <ThemedText type="subtitle" accessibilityRole="header">Add vehicle</ThemedText>
-          <ThemedText themeColor="textSecondary">Your odometer reading is the first authoritative manual baseline.</ThemedText>
-          <Field label="Nickname" value={draft.nickname} onChangeText={(nickname) => setDraft({ ...draft, nickname })} onBlur={() => setTouched({ ...touched, nickname: true })} error={touched.nickname && !draft.nickname.trim() ? 'Nickname is required.' : undefined} />
-          <Field label="Year" value={draft.year} onChangeText={(year) => setDraft({ ...draft, year })} onBlur={() => setTouched({ ...touched, year: true })} keyboardType="number-pad" error={touched.year && (!Number.isInteger(Number(draft.year)) || Number(draft.year) < 1886) ? 'Enter a valid year.' : undefined} />
-          <Field label="Make" value={draft.make} onChangeText={(make) => setDraft({ ...draft, make })} onBlur={() => setTouched({ ...touched, make: true })} error={touched.make && !draft.make.trim() ? 'Make is required.' : undefined} />
-          <Field label="Model" value={draft.model} onChangeText={(model) => setDraft({ ...draft, model })} onBlur={() => setTouched({ ...touched, model: true })} error={touched.model && !draft.model.trim() ? 'Model is required.' : undefined} />
-          <Field label="Odometer (mi)" value={draft.odometer} onChangeText={(odometer) => setDraft({ ...draft, odometer })} onBlur={() => setTouched({ ...touched, odometer: true })} keyboardType="number-pad" error={touched.odometer && !isMileage(draft.odometer) ? 'Enter a non-negative whole number of miles.' : undefined} />
+          <View style={styles.formNavigation}><Pressable accessibilityRole="button" onPress={onCancel}><ThemedText style={styles.navigationAction}>Cancel</ThemedText></Pressable><ThemedText accessibilityRole="header" style={styles.formTitle}>Add vehicle</ThemedText><Pressable accessibilityRole="button" disabled={Boolean(validation) || saving} onPress={save}><ThemedText style={[styles.navigationAction, (validation || saving) && styles.disabled]}>Save</ThemedText></Pressable></View>
+          <View style={styles.photoPanel}><SymbolView name={{ ios: 'photo.badge.plus', android: 'add_a_photo', web: 'image' }} tintColor={TorqueColors.primary} size={28} /><ThemedText style={styles.photoTitle}>Add a hero photo</ThemedText><ThemedText style={styles.photoDetail}>Optional</ThemedText></View>
+          <ThemedText style={styles.formIntro}>Your current odometer is the first authoritative manual baseline.</ThemedText>
+          <View style={styles.fieldGroup}><Field label="Nickname" value={draft.nickname} onChangeText={(nickname) => setDraft({ ...draft, nickname })} onBlur={() => setTouched({ ...touched, nickname: true })} error={touched.nickname && !draft.nickname.trim() ? 'Nickname is required.' : undefined} /><Field label="Year" value={draft.year} onChangeText={(year) => setDraft({ ...draft, year })} onBlur={() => setTouched({ ...touched, year: true })} keyboardType="number-pad" error={touched.year && (!Number.isInteger(Number(draft.year)) || Number(draft.year) < 1886) ? 'Enter a valid year.' : undefined} /><Field label="Make" value={draft.make} onChangeText={(make) => setDraft({ ...draft, make })} onBlur={() => setTouched({ ...touched, make: true })} error={touched.make && !draft.make.trim() ? 'Make is required.' : undefined} /><Field label="Model" value={draft.model} onChangeText={(model) => setDraft({ ...draft, model })} onBlur={() => setTouched({ ...touched, model: true })} error={touched.model && !draft.model.trim() ? 'Model is required.' : undefined} /><Field label="Odometer (mi)" value={draft.odometer} onChangeText={(odometer) => setDraft({ ...draft, odometer })} onBlur={() => setTouched({ ...touched, odometer: true })} keyboardType="number-pad" error={touched.odometer && !isMileage(draft.odometer) ? 'Enter a non-negative whole number of miles.' : undefined} /></View>
           {error && <ThemedText style={styles.error} accessibilityLiveRegion="polite">{error}</ThemedText>}
-          <ActionButton label={saving ? 'Saving...' : 'Save vehicle'} onPress={save} disabled={Boolean(validation) || saving} />
-          <Pressable accessibilityRole="button" onPress={onCancel} style={styles.cancel}><ThemedText type="linkPrimary">Cancel</ThemedText></Pressable>
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
@@ -131,8 +127,8 @@ function VehicleForm({ onCancel, onCreated }: Readonly<{ onCancel: () => void; o
 function Field({ label, error, ...props }: Readonly<{ label: string; error?: string } & React.ComponentProps<typeof TextInput>>) {
   return (
     <View style={styles.field}>
-      <ThemedText>{label}</ThemedText>
-      <TextInput {...props} accessibilityLabel={label} accessibilityHint={error} style={styles.input} />
+      <ThemedText style={styles.fieldLabel}>{label}</ThemedText>
+      <TextInput {...props} accessibilityLabel={label} accessibilityHint={error} placeholderTextColor={TorqueColors.secondary} style={styles.input} />
       {error && <ThemedText style={styles.error} accessibilityLiveRegion="polite">{error}</ThemedText>}
     </View>
   );
@@ -153,11 +149,9 @@ function toMilliMiles(value: string) { return (BigInt(value.trim()) * 1_000n).to
 function formatMiles(milliMiles: string) { return (BigInt(milliMiles) / 1_000n).toLocaleString(); }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 }, safeArea: { flex: 1 }, content: { padding: Spacing.four, gap: Spacing.three },
-  empty: { flex: 1, justifyContent: 'center', gap: Spacing.three, minHeight: 480 }, list: { gap: Spacing.three },
-  vehicleCard: { padding: Spacing.three, borderRadius: Spacing.three, gap: Spacing.one }, field: { gap: Spacing.one },
-  input: { minHeight: 48, borderWidth: 1, borderColor: '#8A8883', borderRadius: 10, paddingHorizontal: Spacing.two, fontSize: 17, color: '#1D1C19' },
-  action: { minHeight: 48, borderRadius: 24, backgroundColor: '#29352E', alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.three },
-  actionText: { color: '#FFFFFF', fontWeight: '700' }, cancel: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  error: { color: '#A52A2A' }, disabled: { opacity: 0.45 },
+  screen: { flex: 1, backgroundColor: TorqueColors.canvas }, safeArea: { flex: 1 }, content: { padding: Spacing.four, gap: Spacing.three }, pageTitle: { color: TorqueColors.text, fontSize: 34, lineHeight: 41, fontWeight: '700' },
+  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: Spacing.three, minHeight: 480 }, emptyIcon: { width: 84, height: 84, borderRadius: 42, backgroundColor: '#E5F1FF', alignItems: 'center', justifyContent: 'center' }, emptyTitle: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, emptyCopy: { color: TorqueColors.secondary, fontSize: 15, lineHeight: 21, textAlign: 'center', maxWidth: 300 }, list: { gap: Spacing.three },
+  vehicleCard: { borderRadius: 18, overflow: 'hidden', backgroundColor: TorqueColors.card }, vehicleHero: { height: 150, backgroundColor: '#E8F2FC', alignItems: 'center', justifyContent: 'center' }, vehicleDetails: { padding: Spacing.three, gap: Spacing.half }, vehicleName: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, vehicleModel: { color: TorqueColors.text, fontSize: 16 }, vehicleMileage: { color: TorqueColors.secondary, fontSize: 13 },
+  formNavigation: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, formTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700' }, navigationAction: { color: TorqueColors.primary, fontSize: 17 }, photoPanel: { height: 132, borderRadius: Spacing.three, borderWidth: 1, borderColor: TorqueColors.divider, backgroundColor: TorqueColors.card, alignItems: 'center', justifyContent: 'center', gap: Spacing.one }, photoTitle: { color: TorqueColors.primary, fontSize: 16, fontWeight: '600' }, photoDetail: { color: TorqueColors.secondary, fontSize: 13 }, formIntro: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 }, fieldGroup: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, paddingHorizontal: Spacing.three }, field: { gap: Spacing.one, paddingVertical: Spacing.two, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider }, fieldLabel: { color: TorqueColors.text, fontSize: 13, fontWeight: '600' },
+  input: { minHeight: 30, paddingVertical: Spacing.one, fontSize: 17, color: TorqueColors.text }, action: { minHeight: 48, borderRadius: 12, backgroundColor: TorqueColors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.three }, actionText: { color: '#FFFFFF', fontWeight: '700' }, error: { color: TorqueColors.error }, disabled: { opacity: 0.45 },
 });

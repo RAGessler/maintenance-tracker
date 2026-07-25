@@ -61,5 +61,15 @@ export const Spacing = {
   six: 64,
 } as const;
 
+export const TorqueColors = {
+  canvas: '#F2F2F7',
+  card: '#FFFFFF',
+  primary: '#007AFF',
+  secondary: '#8E8E93',
+  divider: 'rgba(60, 60, 67, 0.12)',
+  text: '#1C1C1E',
+  error: '#FF3B30',
+} as const;
+
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;

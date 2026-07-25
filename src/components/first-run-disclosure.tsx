@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { currentDisclosureVersion } from '@/constants/disclosure';
-import { Spacing } from '@/constants/theme';
+import { Spacing, TorqueColors } from '@/constants/theme';
 import { maintenanceStore } from '../../modules/maintenance-store';
 
 export function FirstRunDisclosure({ onAccepted }: Readonly<{ onAccepted: () => void }>) {
@@ -30,9 +30,11 @@ export function FirstRunDisclosure({ onAccepted }: Readonly<{ onAccepted: () => 
     <ThemedView style={styles.screen}>
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content}>
-          <ThemedText type="subtitle" accessibilityRole="header">
+          <View style={styles.icon}><ThemedText style={styles.iconText}>TL</ThemedText></View>
+          <ThemedText accessibilityRole="header" style={styles.title}>
             {detailsVisible ? 'What is collected, kept, and deleted' : 'Everything lives on this iPhone'}
           </ThemedText>
+          {!detailsVisible && <ThemedText style={styles.intro}>Read this before you add a vehicle or turn on tracking. It will not change quietly later.</ThemedText>}
           {detailsVisible ? <DisclosureDetails /> : <DisclosureSummary />}
           {error && <ThemedText accessibilityLiveRegion="polite" style={styles.error}>{error}</ThemedText>}
           <Pressable
@@ -61,32 +63,46 @@ export function FirstRunDisclosure({ onAccepted }: Readonly<{ onAccepted: () => 
 
 function DisclosureSummary() {
   return (
-    <ThemedView style={styles.card}>
-      <ThemedText>Your vehicles and history stay on this device. There is no account, automatic sync, sharing, or app-level recovery.</ThemedText>
-      <ThemedText>Deleting the app, losing this iPhone, or replacing it can permanently lose your data. Device backups are outside the app&apos;s control and are not a recovery promise.</ThemedText>
-      <ThemedText>Before tracking starts, the app may temporarily use precise location to estimate distance. You can review this information later in Settings.</ThemedText>
+    <ThemedView style={styles.group}>
+      <DisclosureRow title="No account, no server" detail="Your vehicles and history stay on this iPhone." />
+      <DisclosureRow title="No sync or sharing" detail="The app does not copy your data to another device." />
+      <DisclosureRow title="No app-level backup or recovery" detail="There is no account to restore from." />
+      <DisclosureRow title="Uninstalling or losing this iPhone" detail="Can permanently lose your data." />
+      <DisclosureRow title="No migration promise" detail="A future version may not carry this beta data forward." last />
     </ThemedView>
   );
 }
 
 function DisclosureDetails() {
   return (
-    <ThemedView style={styles.card}>
-      <ThemedText>Vehicle profiles, maintenance, odometer readings, reviewed trips, and configured triggers remain on this iPhone until you delete them.</ThemedText>
-      <ThemedText>Precise location is temporary: it is used only for active distance calculation, the reconnect grace period, and safe recovery. Terminal trips do not retain precise points.</ThemedText>
-      <ThemedText>Diagnostics are kept locally for up to 30 days with a storage cap. Any data you deliberately move outside the app remains under your control.</ThemedText>
-      <ThemedText>App deletion removes this installation&apos;s local data. It cannot remove device backups or copies you have placed elsewhere.</ThemedText>
+    <ThemedView style={styles.group}>
+      <DisclosureRow title="Temporary precise location" detail="Used for active distance, a short reconnect grace period, and safe recovery. Terminal trips do not retain precise points." />
+      <DisclosureRow title="Records and retention" detail="Vehicle profiles, maintenance, odometer readings, and reviewed trips remain here until deleted." />
+      <DisclosureRow title="Diagnostics and exports" detail="Diagnostics are local and capped. Any data you move outside the app remains under your control." />
+      <DisclosureRow title="Deletion limits" detail="Deleting the app cannot remove device backups or copies you placed elsewhere." last />
     </ThemedView>
   );
 }
 
+function DisclosureRow({ title, detail, last = false }: Readonly<{ title: string; detail: string; last?: boolean }>) {
+  return <View style={[styles.row, last && styles.lastRow]}><ThemedText style={styles.rowTitle}>{title}</ThemedText><ThemedText style={styles.rowDetail}>{detail}</ThemedText></View>;
+}
+
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
+  screen: { flex: 1, backgroundColor: TorqueColors.canvas },
   safeArea: { flex: 1 },
   content: { flexGrow: 1, padding: Spacing.four, justifyContent: 'center', gap: Spacing.three },
-  card: { gap: Spacing.three, padding: Spacing.three, borderRadius: Spacing.three, backgroundColor: '#F2EFE9' },
-  primaryButton: { minHeight: 48, borderRadius: 24, backgroundColor: '#29352E', justifyContent: 'center', alignItems: 'center', paddingHorizontal: Spacing.three },
+  icon: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#E5F1FF', alignItems: 'center', justifyContent: 'center' },
+  iconText: { color: TorqueColors.primary, fontWeight: '800', letterSpacing: 1 },
+  title: { color: TorqueColors.text, fontSize: 27, lineHeight: 33, fontWeight: '700' },
+  intro: { color: TorqueColors.secondary, fontSize: 15, lineHeight: 21 },
+  group: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, paddingHorizontal: Spacing.three },
+  row: { paddingVertical: Spacing.three, gap: Spacing.half, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider },
+  lastRow: { borderBottomWidth: 0 },
+  rowTitle: { color: TorqueColors.text, fontSize: 16, lineHeight: 21, fontWeight: '600' },
+  rowDetail: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 },
+  primaryButton: { minHeight: 50, borderRadius: 12, backgroundColor: TorqueColors.primary, justifyContent: 'center', alignItems: 'center', paddingHorizontal: Spacing.three },
   primaryButtonText: { color: '#FFFFFF', fontWeight: '700', textAlign: 'center' },
-  error: { color: '#A52A2A' },
+  error: { color: TorqueColors.error },
   pressed: { opacity: 0.65 },
 });
