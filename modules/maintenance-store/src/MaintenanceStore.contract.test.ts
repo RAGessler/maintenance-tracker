@@ -35,7 +35,7 @@ test('product-store creates a vehicle without exposing storage internals', async
 
   assert.deepEqual(vehicle, { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' });
   assert.deepEqual(calls, [['Daily', 2020, 'Honda', 'Civic', '42125000']]);
-  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createVehicle', 'deleteAllData', 'getArchivedVehicles', 'getBootstrap', 'getRecoveryState', 'getVehicles', 'restoreVehicle', 'updateVehicle']);
+  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createVehicle', 'deleteAllData', 'getArchivedVehicles', 'getBootstrap', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateVehicle']);
 });
 
 test('product-store exposes first-run state and garage vehicles without exposing persistence details', async () => {
@@ -65,7 +65,7 @@ test('product-store exposes first-run state and garage vehicles without exposing
   assert.deepEqual(await store.product.getVehicles(), [
     { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic', currentOdometerMilliMiles: '42125000', scheduleCount: 0, trackingReadiness: 'manual_only' },
   ]);
-  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createVehicle', 'deleteAllData', 'getArchivedVehicles', 'getBootstrap', 'getRecoveryState', 'getVehicles', 'restoreVehicle', 'updateVehicle']);
+  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createVehicle', 'deleteAllData', 'getArchivedVehicles', 'getBootstrap', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateVehicle']);
 });
 
 test('product-store reports when an installed development client lacks the garage bridge', async () => {
@@ -146,4 +146,31 @@ test('product-store exposes recovery and reset without exposing the failed store
     disclosureVersion: 0,
     schemaVersion: 1,
   });
+});
+
+test('product-store forwards hero-photo replacement and removal without exposing file storage', async () => {
+  const calls: unknown[][] = [];
+  const native = {
+    getBootstrap: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 1 }),
+    getRecoveryState: async () => ({ state: 'ready' as const }),
+    acceptDisclosure: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 1 }),
+    deleteAllData: async () => ({ disclosureAccepted: false, disclosureVersion: 0, schemaVersion: 1 }),
+    createVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    getVehicles: async () => [],
+    getArchivedVehicles: async () => [],
+    updateVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    archiveVehicle: async () => {},
+    restoreVehicle: async () => {},
+    replaceHeroPhoto: async (...args: unknown[]) => { calls.push(args); },
+    removeHeroPhoto: async (...args: unknown[]) => { calls.push(args); },
+    getTrackingSnapshot: async () => ({ state: 'idle' as const }),
+    startTracking: async () => ({ state: 'tracking' as const }),
+    stopTracking: async () => ({ state: 'idle' as const }),
+  } as unknown as NativeMaintenanceStore;
+
+  const product = createMaintenanceStore(native).product;
+  await product.replaceHeroPhoto({ vehicleId: '7', sourceUri: 'file:///temporary/photo.jpg' });
+  await product.removeHeroPhoto('7');
+
+  assert.deepEqual(calls, [['7', 'file:///temporary/photo.jpg'], ['7']]);
 });

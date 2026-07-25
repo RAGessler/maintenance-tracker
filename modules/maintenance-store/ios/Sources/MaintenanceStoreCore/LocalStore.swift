@@ -3,6 +3,7 @@ import SQLite3
 
 public enum LocalStoreError: Error, Equatable {
   case invalidVehicle
+  case invalidPhoto
   case disclosureRequired
   case trackingConflict
   case sqlite(String)
@@ -292,6 +293,84 @@ public final class LocalStore: @unchecked Sendable {
       }
       try fileManager.removeItem(at: fileURL)
     }
+  }
+
+  public func replaceHeroPhoto(for vehicleId: Int64, jpegData: Data, in directoryURL: URL, now: Int64) throws {
+    guard !jpegData.isEmpty, jpegData.count <= 2_000_000 else { throw LocalStoreError.invalidPhoto }
+    Self.writeLock.lock()
+    defer { Self.writeLock.unlock() }
+
+    let fileManager = FileManager.default
+    try fileManager.createDirectory(
+      at: directoryURL,
+      withIntermediateDirectories: true,
+      attributes: [.protectionKey: FileProtectionType.complete]
+    )
+    let filename = "\(UUID().uuidString.lowercased()).jpg"
+    let fileURL = directoryURL.appendingPathComponent(filename)
+    try jpegData.write(to: fileURL, options: .atomic)
+    try fileManager.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: fileURL.path)
+    let oldFilename: String?
+
+    do {
+      oldFilename = try heroPhotoFilename(for: vehicleId)
+      try transactionLocked {
+        guard try queryOne("SELECT id FROM vehicle WHERE id = ?", [.integer(vehicleId)]) != nil else {
+          throw LocalStoreError.invalidVehicle
+        }
+        try run(
+          """
+          INSERT INTO photo_asset (vehicle_id, relative_filename, media_type, byte_count, checksum, created_at)
+          VALUES (?, ?, 'image/jpeg', ?, ?, ?)
+          ON CONFLICT(vehicle_id) DO UPDATE SET relative_filename = excluded.relative_filename,
+            media_type = excluded.media_type, byte_count = excluded.byte_count, checksum = excluded.checksum,
+            created_at = excluded.created_at
+          """,
+          [.integer(vehicleId), .text(filename), .integer(Int64(jpegData.count)), .text(UUID().uuidString), .integer(now)]
+        )
+      }
+    } catch {
+      try? fileManager.removeItem(at: fileURL)
+      throw error
+    }
+    if let oldFilename, let oldFileURL = photoFileURL(for: oldFilename, in: directoryURL) {
+      // A later open reconciles a stale file without misreporting a committed replacement as failed.
+      try? fileManager.removeItem(at: oldFileURL)
+    }
+  }
+
+  public func removeHeroPhoto(for vehicleId: Int64, in directoryURL: URL) throws {
+    Self.writeLock.lock()
+    defer { Self.writeLock.unlock() }
+
+    let filename = try heroPhotoFilename(for: vehicleId)
+    try transactionLocked {
+      try run("DELETE FROM photo_asset WHERE vehicle_id = ?", [.integer(vehicleId)])
+    }
+    if let filename, let fileURL = photoFileURL(for: filename, in: directoryURL) {
+      // A later open reconciles a stale file without misreporting a committed removal as failed.
+      try? FileManager.default.removeItem(at: fileURL)
+    }
+  }
+
+  public func heroPhotoFilenames() throws -> [String] {
+    try photoAssets().map(\.filename)
+  }
+
+  public func heroPhotoFilename(for vehicleId: Int64) throws -> String? {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, "SELECT relative_filename FROM photo_asset WHERE vehicle_id = ?", -1, &statement, nil) == SQLITE_OK,
+          let statement else {
+      throw failure(database)
+    }
+    defer { sqlite3_finalize(statement) }
+    try bind([.integer(vehicleId)], to: statement)
+    guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+    guard let filename = sqlite3_column_text(statement, 0) else {
+      throw LocalStoreError.sqlite("Photo asset was missing its filename")
+    }
+    return String(cString: filename)
   }
 
   private func configure(_ connection: OpaquePointer) throws {

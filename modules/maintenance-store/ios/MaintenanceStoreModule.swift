@@ -1,4 +1,6 @@
 import ExpoModulesCore
+import ImageIO
+import UIKit
 
 public class MaintenanceStoreModule: Module {
   private var store: LocalStore?
@@ -34,6 +36,15 @@ public class MaintenanceStoreModule: Module {
     }
 
     AsyncFunction("deleteAllData") { () throws -> [String: Any] in
+      let store = try self.localStore()
+      let photosDirectory = try self.photoDirectory()
+      for filename in try store.heroPhotoFilenames() {
+        guard !filename.contains("/"), !filename.contains("\\") else { continue }
+        let photoURL = photosDirectory.appendingPathComponent(filename, isDirectory: false)
+        if FileManager.default.fileExists(atPath: photoURL.path) {
+          try FileManager.default.removeItem(at: photoURL)
+        }
+      }
       self.store?.close()
       self.store = nil
       self.openingError = nil
@@ -46,11 +57,11 @@ public class MaintenanceStoreModule: Module {
     }
 
     AsyncFunction("getVehicles") { () throws -> [[String: Any]] in
-      try self.localStore().vehicles(archived: false).map(Self.vehicleDictionary)
+      try self.localStore().vehicles(archived: false).map { try self.vehicleDictionary($0) }
     }
 
     AsyncFunction("getArchivedVehicles") { () throws -> [[String: Any]] in
-      try self.localStore().vehicles(archived: true).map(Self.vehicleDictionary)
+      try self.localStore().vehicles(archived: true).map { try self.vehicleDictionary($0) }
     }
 
     AsyncFunction("createVehicle") {
@@ -89,6 +100,26 @@ public class MaintenanceStoreModule: Module {
     AsyncFunction("restoreVehicle") { (vehicleId: String) throws -> Void in
       guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidVehicle }
       try self.localStore().restoreVehicle(id: nativeVehicleId, now: Self.now())
+    }
+
+    AsyncFunction("replaceHeroPhoto") { (vehicleId: String, sourceUri: String) throws -> Void in
+      guard let nativeVehicleId = Int64(vehicleId),
+            let sourceURL = URL(string: sourceUri),
+            sourceURL.isFileURL else {
+        throw LocalStoreError.invalidPhoto
+      }
+      let jpegData = try Self.normalizedHeroPhoto(from: sourceURL)
+      try self.localStore().replaceHeroPhoto(
+        for: nativeVehicleId,
+        jpegData: jpegData,
+        in: try self.photoDirectory(),
+        now: Self.now()
+      )
+    }
+
+    AsyncFunction("removeHeroPhoto") { (vehicleId: String) throws -> Void in
+      guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidVehicle }
+      try self.localStore().removeHeroPhoto(for: nativeVehicleId, in: try self.photoDirectory())
     }
 
     AsyncFunction("getTrackingSnapshot") { () throws -> [String: String] in
@@ -144,12 +175,61 @@ public class MaintenanceStoreModule: Module {
     return directory
   }
 
+  private func photoDirectory() throws -> URL {
+    let directory = try storeDirectory().appendingPathComponent("photos", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: directory,
+      withIntermediateDirectories: true,
+      attributes: [.protectionKey: FileProtectionType.complete]
+    )
+    return directory
+  }
+
   private static func now() -> Int64 {
     Int64(Date().timeIntervalSince1970 * 1_000)
   }
 
-  private static func vehicleDictionary(_ vehicle: StoredGarageVehicle) -> [String: Any] {
-    [
+  private static func normalizedHeroPhoto(from sourceURL: URL) throws -> Data {
+    let sourceData = try Data(contentsOf: sourceURL, options: .mappedIfSafe)
+    let allowedTypes = ["public.heic", "public.heif", "public.jpeg", "public.png"]
+    guard sourceData.count <= 10_000_000,
+          let imageSource = CGImageSourceCreateWithData(sourceData as CFData, nil),
+          let sourceType = CGImageSourceGetType(imageSource) as String?,
+          allowedTypes.contains(sourceType),
+          let image = UIImage(data: sourceData) else {
+      throw LocalStoreError.invalidPhoto
+    }
+
+    var maxDimension: CGFloat = 2_048
+    var quality: CGFloat = 0.82
+    for _ in 0..<12 {
+      let scale = min(1, maxDimension / max(image.size.width, image.size.height))
+      let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+      guard size.width >= 32, size.height >= 32 else { break }
+      let format = UIGraphicsImageRendererFormat.default()
+      format.scale = 1
+      let data = UIGraphicsImageRenderer(size: size, format: format).jpegData(withCompressionQuality: quality) { _ in
+        image.draw(in: CGRect(origin: .zero, size: size))
+      }
+      if data.count <= 2_000_000 { return data }
+      maxDimension *= 0.8
+      quality *= 0.9
+    }
+    throw LocalStoreError.invalidPhoto
+  }
+
+  private func vehicleDictionary(_ vehicle: StoredGarageVehicle) throws -> [String: Any] {
+    let filename = try localStore().heroPhotoFilename(for: vehicle.id)
+    let photoURI: String?
+    if let filename,
+       !filename.contains("/"),
+       !filename.contains("\\") {
+      let url = try photoDirectory().appendingPathComponent(filename, isDirectory: false)
+      photoURI = FileManager.default.fileExists(atPath: url.path) ? url.absoluteString : nil
+    } else {
+      photoURI = nil
+    }
+    return [
       "id": String(vehicle.id),
       "nickname": vehicle.nickname,
       "year": vehicle.year,
@@ -158,6 +238,7 @@ public class MaintenanceStoreModule: Module {
       "currentOdometerMilliMiles": String(vehicle.currentOdometerMilliMiles),
       "scheduleCount": vehicle.scheduleCount,
       "trackingReadiness": vehicle.trackingReadiness,
+      "heroPhotoUri": photoURI as Any,
     ]
   }
 }

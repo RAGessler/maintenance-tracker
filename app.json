@@ -29,6 +29,14 @@
       "expo-router",
       "./plugins/with-maintenance-store",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Maintenance Tracker to select a private vehicle hero photo.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#208AEF",

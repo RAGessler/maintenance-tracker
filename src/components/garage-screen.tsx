@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, type Href } from 'expo-router';
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { ActionSheetIOS, Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -105,8 +106,8 @@ function VehicleCard({ vehicle, onChanged }: Readonly<{ vehicle: GarageVehicle; 
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={`${vehicle.nickname}, ${vehicle.year} ${vehicle.make} ${vehicle.model}, ${formatMiles(vehicle.currentOdometerMilliMiles)} mile manual odometer reading`} onPress={() => setEditing(true)}>
       <ThemedView style={styles.vehicleCard}>
-          <View style={styles.vehicleHero}><SymbolView name={{ ios: 'car.side.fill', android: 'directions_car', web: 'directions_car' }} tintColor="#B9D8F7" size={54} /></View>
-          <View style={styles.vehicleDetails}><ThemedText style={styles.vehicleName}>{vehicle.nickname}</ThemedText><ThemedText style={styles.vehicleModel}>{vehicle.year} {vehicle.make} {vehicle.model}</ThemedText><ThemedText style={styles.vehicleMileage}>{formatMiles(vehicle.currentOdometerMilliMiles)} mi estimated</ThemedText><ThemedText style={styles.vehicleMileage}>Due: {vehicle.scheduleCount === 0 ? 'No schedules yet' : `${vehicle.scheduleCount} schedules`}</ThemedText><ThemedText style={styles.vehicleMileage}>Tracking: {vehicle.trackingReadiness === 'automatic_setup' ? 'Automatic setup configured' : 'Manual only'}</ThemedText><ThemedText style={styles.vehicleMileage}>Hero photo: Not added</ThemedText></View>
+          {vehicle.heroPhotoUri ? <Image source={{ uri: vehicle.heroPhotoUri }} style={styles.vehicleHero} accessibilityLabel={`${vehicle.nickname} hero photo`} /> : <View style={styles.vehicleHero}><SymbolView name={{ ios: 'car.side.fill', android: 'directions_car', web: 'directions_car' }} tintColor="#B9D8F7" size={54} /></View>}
+          <View style={styles.vehicleDetails}><ThemedText style={styles.vehicleName}>{vehicle.nickname}</ThemedText><ThemedText style={styles.vehicleModel}>{vehicle.year} {vehicle.make} {vehicle.model}</ThemedText><ThemedText style={styles.vehicleMileage}>{formatMiles(vehicle.currentOdometerMilliMiles)} mi estimated</ThemedText><ThemedText style={styles.vehicleMileage}>Due: {vehicle.scheduleCount === 0 ? 'No schedules yet' : `${vehicle.scheduleCount} schedules`}</ThemedText><ThemedText style={styles.vehicleMileage}>Tracking: {vehicle.trackingReadiness === 'automatic_setup' ? 'Automatic setup configured' : 'Manual only'}</ThemedText><ThemedText style={styles.vehicleMileage}>Hero photo: {vehicle.heroPhotoUri ? 'Added' : 'Not added'}</ThemedText></View>
       </ThemedView>
     </Pressable>
   );
@@ -136,9 +137,33 @@ function VehicleEditor({ vehicle, onCancel, onChanged }: Readonly<{ vehicle: Gar
     { text: 'Cancel', style: 'cancel' },
     { text: 'Archive', style: 'destructive', onPress: async () => { try { await maintenanceStore.product.archiveVehicle(vehicle.id); onChanged(); } catch { setError('This vehicle cannot be archived while a trip is active. Stop the trip first.'); } } },
   ]);
+  const changePhoto = async () => {
+    setError(null);
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 1 });
+    if (result.canceled) return;
+    const photo = result.assets[0];
+    if (photo.fileSize && photo.fileSize > 10_000_000) {
+      setError('Choose an image smaller than 10 MB.');
+      return;
+    }
+    try { await maintenanceStore.product.replaceHeroPhoto({ vehicleId: vehicle.id, sourceUri: photo.uri }); onChanged(); }
+    catch { setError('The photo could not be added. Your current photo is unchanged.'); }
+  };
+  const removePhoto = async () => {
+    try { await maintenanceStore.product.removeHeroPhoto(vehicle.id); onChanged(); }
+    catch { setError('The photo could not be removed. Try again.'); }
+  };
+  const photoOptions = () => {
+    const options = vehicle.heroPhotoUri ? ['Replace photo', 'Remove photo', 'Cancel'] : ['Choose photo', 'Cancel'];
+    ActionSheetIOS.showActionSheetWithOptions({ options, cancelButtonIndex: options.length - 1, destructiveButtonIndex: vehicle.heroPhotoUri ? 1 : undefined }, (index) => {
+      if (index === 0) void changePhoto();
+      if (vehicle.heroPhotoUri && index === 1) void removePhoto();
+    });
+  };
   return <ThemedView style={styles.screen}><SafeAreaView style={styles.safeArea}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
     <View style={styles.formNavigation}><Pressable accessibilityRole="button" onPress={onCancel}><ThemedText style={styles.navigationAction}>Cancel</ThemedText></Pressable><ThemedText accessibilityRole="header" style={styles.formTitle}>Vehicle profile</ThemedText><Pressable accessibilityRole="button" disabled={!valid || saving} onPress={save}><ThemedText style={[styles.navigationAction, (!valid || saving) && styles.disabled]}>Save</ThemedText></Pressable></View>
     <ThemedText style={styles.formIntro}>Identity fields can be changed here. Odometer readings remain an auditable history and are updated separately.</ThemedText>
+    <Pressable accessibilityRole="button" accessibilityLabel="Hero photo" accessibilityHint="Opens photo options" onPress={photoOptions} style={styles.photoPanel}>{vehicle.heroPhotoUri ? <Image source={{ uri: vehicle.heroPhotoUri }} style={styles.photoPreview} accessibilityLabel={`${vehicle.nickname} hero photo`} /> : <SymbolView name={{ ios: 'photo.badge.plus', android: 'add_a_photo', web: 'image' }} tintColor={TorqueColors.primary} size={28} />}<ThemedText style={styles.photoTitle}>{vehicle.heroPhotoUri ? 'Hero photo' : 'Add a hero photo'}</ThemedText></Pressable>
     <View style={styles.fieldGroup}><Field label="Nickname" value={draft.nickname} onChangeText={(nickname) => setDraft({ ...draft, nickname })} /><Field label="Year" value={draft.year} onChangeText={(year) => setDraft({ ...draft, year })} keyboardType="number-pad" /><Field label="Make" value={draft.make} onChangeText={(make) => setDraft({ ...draft, make })} /><Field label="Model" value={draft.model} onChangeText={(model) => setDraft({ ...draft, model })} /></View>
     <View style={styles.readOnlyRow}><ThemedText style={styles.fieldLabel}>Current manual odometer</ThemedText><ThemedText>{formatMiles(vehicle.currentOdometerMilliMiles)} mi</ThemedText></View>
     {error && <ThemedText style={styles.error} accessibilityLiveRegion="polite">{error}</ThemedText>}
@@ -174,7 +199,7 @@ function VehicleForm({ onCancel, onCreated }: Readonly<{ onCancel: () => void; o
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.formNavigation}><Pressable accessibilityRole="button" onPress={onCancel}><ThemedText style={styles.navigationAction}>Cancel</ThemedText></Pressable><ThemedText accessibilityRole="header" style={styles.formTitle}>Add vehicle</ThemedText><Pressable accessibilityRole="button" disabled={Boolean(validation) || saving} onPress={save}><ThemedText style={[styles.navigationAction, (validation || saving) && styles.disabled]}>Save</ThemedText></Pressable></View>
-          <View style={styles.photoPanel}><SymbolView name={{ ios: 'photo.badge.plus', android: 'add_a_photo', web: 'image' }} tintColor={TorqueColors.primary} size={28} /><ThemedText style={styles.photoTitle}>Add a hero photo</ThemedText><ThemedText style={styles.photoDetail}>Optional</ThemedText></View>
+           <View style={styles.photoPanel}><SymbolView name={{ ios: 'photo.badge.plus', android: 'add_a_photo', web: 'image' }} tintColor={TorqueColors.primary} size={28} /><ThemedText style={styles.photoTitle}>Add a hero photo after saving</ThemedText><ThemedText style={styles.photoDetail}>Optional</ThemedText></View>
           <ThemedText style={styles.formIntro}>Your current odometer is the first authoritative manual baseline.</ThemedText>
           <View style={styles.fieldGroup}><Field label="Nickname" value={draft.nickname} onChangeText={(nickname) => setDraft({ ...draft, nickname })} onBlur={() => setTouched({ ...touched, nickname: true })} error={touched.nickname && !draft.nickname.trim() ? 'Nickname is required.' : undefined} /><Field label="Year" value={draft.year} onChangeText={(year) => setDraft({ ...draft, year })} onBlur={() => setTouched({ ...touched, year: true })} keyboardType="number-pad" error={touched.year && (!Number.isInteger(Number(draft.year)) || Number(draft.year) < 1886) ? 'Enter a valid year.' : undefined} /><Field label="Make" value={draft.make} onChangeText={(make) => setDraft({ ...draft, make })} onBlur={() => setTouched({ ...touched, make: true })} error={touched.make && !draft.make.trim() ? 'Make is required.' : undefined} /><Field label="Model" value={draft.model} onChangeText={(model) => setDraft({ ...draft, model })} onBlur={() => setTouched({ ...touched, model: true })} error={touched.model && !draft.model.trim() ? 'Model is required.' : undefined} /><Field label="Odometer (mi)" value={draft.odometer} onChangeText={(odometer) => setDraft({ ...draft, odometer })} onBlur={() => setTouched({ ...touched, odometer: true })} keyboardType="number-pad" error={touched.odometer && !isMileage(draft.odometer) ? 'Enter a non-negative whole number of miles.' : undefined} /></View>
           {error && <ThemedText style={styles.error} accessibilityLiveRegion="polite">{error}</ThemedText>}
@@ -212,6 +237,6 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas }, safeArea: { flex: 1 }, content: { padding: Spacing.four, gap: Spacing.three }, pageTitle: { color: TorqueColors.text, fontSize: 34, lineHeight: 41, fontWeight: '700' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: Spacing.three, minHeight: 480 }, emptyIcon: { width: 84, height: 84, borderRadius: 42, backgroundColor: '#E5F1FF', alignItems: 'center', justifyContent: 'center' }, emptyTitle: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, emptyCopy: { color: TorqueColors.secondary, fontSize: 15, lineHeight: 21, textAlign: 'center', maxWidth: 300 }, list: { gap: Spacing.three },
   vehicleCard: { borderRadius: 18, overflow: 'hidden', backgroundColor: TorqueColors.card }, vehicleHero: { height: 150, backgroundColor: '#E8F2FC', alignItems: 'center', justifyContent: 'center' }, vehicleDetails: { padding: Spacing.three, gap: Spacing.half }, vehicleName: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, vehicleModel: { color: TorqueColors.text, fontSize: 16 }, vehicleMileage: { color: TorqueColors.secondary, fontSize: 13 }, sectionTitle: { color: TorqueColors.text, fontSize: 20, fontWeight: '700', marginTop: Spacing.two }, archivedCard: { borderRadius: 16, backgroundColor: TorqueColors.card, padding: Spacing.three, gap: Spacing.two }, archivedDetails: { gap: Spacing.half }, readOnlyRow: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, padding: Spacing.three, gap: Spacing.one },
-  formNavigation: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, formTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700' }, navigationAction: { color: TorqueColors.primary, fontSize: 17 }, photoPanel: { height: 132, borderRadius: Spacing.three, borderWidth: 1, borderColor: TorqueColors.divider, backgroundColor: TorqueColors.card, alignItems: 'center', justifyContent: 'center', gap: Spacing.one }, photoTitle: { color: TorqueColors.primary, fontSize: 16, fontWeight: '600' }, photoDetail: { color: TorqueColors.secondary, fontSize: 13 }, formIntro: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 }, fieldGroup: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, paddingHorizontal: Spacing.three }, field: { gap: Spacing.one, paddingVertical: Spacing.two, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider }, fieldLabel: { color: TorqueColors.text, fontSize: 13, fontWeight: '600' },
+  formNavigation: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, formTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700' }, navigationAction: { color: TorqueColors.primary, fontSize: 17 }, photoPanel: { minHeight: 132, borderRadius: Spacing.three, borderWidth: 1, borderColor: TorqueColors.divider, backgroundColor: TorqueColors.card, alignItems: 'center', justifyContent: 'center', gap: Spacing.one, overflow: 'hidden' }, photoPreview: { width: '100%', height: 132 }, photoTitle: { color: TorqueColors.primary, fontSize: 16, fontWeight: '600' }, photoDetail: { color: TorqueColors.secondary, fontSize: 13 }, formIntro: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 }, fieldGroup: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, paddingHorizontal: Spacing.three }, field: { gap: Spacing.one, paddingVertical: Spacing.two, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider }, fieldLabel: { color: TorqueColors.text, fontSize: 13, fontWeight: '600' },
   input: { minHeight: 30, paddingVertical: Spacing.one, fontSize: 17, color: TorqueColors.text }, action: { minHeight: 48, borderRadius: 12, backgroundColor: TorqueColors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.three }, actionText: { color: '#FFFFFF', fontWeight: '700' }, error: { color: TorqueColors.error }, disabled: { opacity: 0.45 },
 });

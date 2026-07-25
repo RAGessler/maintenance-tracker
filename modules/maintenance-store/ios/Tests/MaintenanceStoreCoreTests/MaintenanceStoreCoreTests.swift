@@ -338,6 +338,39 @@ func reconcilesPhotoFiles() throws {
   #expect(try scalar(database, "SELECT COUNT(*) FROM photo_asset") == 1)
 }
 
+@Test("replacing a hero photo commits the new reference before removing the old file")
+func replacesHeroPhotoSafely() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  let photosURL = directoryURL.appendingPathComponent("photos", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(
+    nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2
+  )
+
+  try store.replaceHeroPhoto(for: vehicle.id, jpegData: Data("first".utf8), in: photosURL, now: 3)
+  let firstFilename = try store.heroPhotoFilename(for: vehicle.id)
+  try store.replaceHeroPhoto(for: vehicle.id, jpegData: Data("second".utf8), in: photosURL, now: 4)
+  let secondFilename = try store.heroPhotoFilename(for: vehicle.id)
+
+  #expect(firstFilename != secondFilename)
+  #expect(!FileManager.default.fileExists(atPath: photosURL.appendingPathComponent(firstFilename!).path))
+  #expect(FileManager.default.fileExists(atPath: photosURL.appendingPathComponent(secondFilename!).path))
+  #expect(try String(contentsOf: photosURL.appendingPathComponent(secondFilename!)) == "second")
+
+  #expect(throws: LocalStoreError.invalidPhoto) {
+    try store.replaceHeroPhoto(for: vehicle.id, jpegData: Data(repeating: 0, count: 2_000_001), in: photosURL, now: 5)
+  }
+  #expect(try store.heroPhotoFilename(for: vehicle.id) == secondFilename)
+  #expect(FileManager.default.fileExists(atPath: photosURL.appendingPathComponent(secondFilename!).path))
+
+  try store.removeHeroPhoto(for: vehicle.id, in: photosURL)
+  #expect(try store.heroPhotoFilename(for: vehicle.id) == nil)
+  #expect(!FileManager.default.fileExists(atPath: photosURL.appendingPathComponent(secondFilename!).path))
+}
+
 @Test("representative garage and odometer reads use their approved indexes")
 func usesApprovedReadIndexes() throws {
   let directoryURL = try temporaryDirectory()

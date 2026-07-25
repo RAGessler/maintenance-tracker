@@ -22,6 +22,11 @@ export type UpdateVehicleInput = Readonly<{
   model: string;
 }>;
 
+export type ReplaceHeroPhotoInput = Readonly<{
+  vehicleId: string;
+  sourceUri: string;
+}>;
+
 export type Bootstrap = Readonly<{
   disclosureAccepted: boolean;
   disclosureVersion: number;
@@ -39,6 +44,7 @@ export type GarageVehicle = Vehicle & Readonly<{
   currentOdometerMilliMiles: string;
   scheduleCount: number;
   trackingReadiness: 'manual_only' | 'automatic_setup';
+  heroPhotoUri?: string;
 }>;
 
 export type TrackingSnapshot = Readonly<{
@@ -65,6 +71,8 @@ export interface NativeMaintenanceStore {
   updateVehicle(id: string, nickname: string, year: number, make: string, model: string): Promise<Vehicle>;
   archiveVehicle(vehicleId: string): Promise<void>;
   restoreVehicle(vehicleId: string): Promise<void>;
+  replaceHeroPhoto?(vehicleId: string, sourceUri: string): Promise<void>;
+  removeHeroPhoto?(vehicleId: string): Promise<void>;
 }
 
 export type MaintenanceStore = Readonly<{
@@ -79,6 +87,8 @@ export type MaintenanceStore = Readonly<{
     updateVehicle(input: UpdateVehicleInput): Promise<Vehicle>;
     archiveVehicle(vehicleId: string): Promise<void>;
     restoreVehicle(vehicleId: string): Promise<void>;
+    replaceHeroPhoto(input: ReplaceHeroPhotoInput): Promise<void>;
+    removeHeroPhoto(vehicleId: string): Promise<void>;
   }>;
   tracking: Readonly<{
     getSnapshot(): Promise<TrackingSnapshot>;
@@ -117,6 +127,18 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
       updateVehicle: (input) => native.updateVehicle(input.id, input.nickname, input.year, input.make, input.model),
       archiveVehicle: (vehicleId) => native.archiveVehicle(vehicleId),
       restoreVehicle: (vehicleId) => native.restoreVehicle(vehicleId),
+      replaceHeroPhoto: (input) => {
+        if (typeof native.replaceHeroPhoto !== 'function') {
+          return Promise.reject(new Error('Rebuild the iOS development client to manage hero photos.'));
+        }
+        return native.replaceHeroPhoto(input.vehicleId, input.sourceUri);
+      },
+      removeHeroPhoto: (vehicleId) => {
+        if (typeof native.removeHeroPhoto !== 'function') {
+          return Promise.reject(new Error('Rebuild the iOS development client to manage hero photos.'));
+        }
+        return native.removeHeroPhoto(vehicleId);
+      },
     },
     tracking: {
       getSnapshot: () => native.getTrackingSnapshot(),
