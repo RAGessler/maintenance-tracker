@@ -3,6 +3,7 @@ import SQLite3
 
 public enum LocalStoreError: Error, Equatable {
   case invalidVehicle
+  case invalidMaintenanceRecord
   case invalidPhoto
   case disclosureRequired
   case trackingConflict
@@ -32,6 +33,16 @@ public struct StoredGarageVehicle: Sendable, Equatable {
 public struct ManualOdometerReading: Sendable, Equatable {
   public let milliMiles: Int64
   public let effectiveAt: Int64
+}
+
+public struct StoredMaintenanceRecord: Sendable, Equatable {
+  public let id: Int64
+  public let vehicleId: Int64
+  public let scheduleId: Int64?
+  public let serviceName: String
+  public let completedOn: String
+  public let milliMiles: Int64
+  public let note: String?
 }
 
 public struct StoreBootstrap: Sendable, Equatable {
@@ -151,6 +162,60 @@ public final class LocalStore: @unchecked Sendable {
       return nil
     }
     return ManualOdometerReading(milliMiles: row[0], effectiveAt: row[1])
+  }
+
+  public func maintenanceRecords(for vehicleId: Int64) throws -> [StoredMaintenanceRecord] {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    let sql = "SELECT id, vehicle_id, schedule_id, service_name, completed_on, milli_miles, note FROM maintenance_record WHERE vehicle_id = ? ORDER BY completed_on DESC, id DESC"
+    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw failure(database) }
+    defer { sqlite3_finalize(statement) }
+    try bind([.integer(vehicleId)], to: statement)
+    var records: [StoredMaintenanceRecord] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      guard let serviceName = sqlite3_column_text(statement, 3), let completedOn = sqlite3_column_text(statement, 4) else { throw LocalStoreError.sqlite("Maintenance record was missing required text") }
+      records.append(StoredMaintenanceRecord(
+        id: sqlite3_column_int64(statement, 0), vehicleId: sqlite3_column_int64(statement, 1),
+        scheduleId: sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 2),
+        serviceName: String(cString: serviceName), completedOn: String(cString: completedOn),
+        milliMiles: sqlite3_column_int64(statement, 5),
+        note: sqlite3_column_type(statement, 6) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(statement, 6)!)
+      ))
+    }
+    return records
+  }
+
+  public func createMaintenanceRecord(vehicleId: Int64, serviceName: String, completedOn: String, milliMiles: Int64, note: String?, now: Int64) throws -> StoredMaintenanceRecord {
+    let normalizedName = serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalizedName.isEmpty, validCivilDate(completedOn), milliMiles >= 0 else { throw LocalStoreError.invalidMaintenanceRecord }
+    var recordId: Int64 = 0
+    try transaction {
+      try requireAcceptedDisclosure()
+      guard try queryOne("SELECT id FROM vehicle WHERE id = ?", [.integer(vehicleId)]) != nil else { throw LocalStoreError.invalidMaintenanceRecord }
+      recordId = try insert("INSERT INTO maintenance_record (vehicle_id, service_name, completed_on, milli_miles, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", [.integer(vehicleId), .text(normalizedName), .text(completedOn), .integer(milliMiles), note.map(Binding.text) ?? .text(""), .integer(now), .integer(now)])
+      if note == nil { try run("UPDATE maintenance_record SET note = NULL WHERE id = ?", [.integer(recordId)]) }
+    }
+    guard let record = try maintenanceRecords(for: vehicleId).first(where: { $0.id == recordId }) else { throw LocalStoreError.sqlite("Maintenance record transaction did not return an identifier") }
+    return record
+  }
+
+  public func updateMaintenanceRecord(id: Int64, vehicleId: Int64, serviceName: String, completedOn: String, milliMiles: Int64, note: String?, now: Int64) throws -> StoredMaintenanceRecord {
+    let normalizedName = serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalizedName.isEmpty, validCivilDate(completedOn), milliMiles >= 0 else { throw LocalStoreError.invalidMaintenanceRecord }
+    try transaction {
+      guard try queryOne("SELECT id FROM maintenance_record WHERE id = ? AND vehicle_id = ?", [.integer(id), .integer(vehicleId)]) != nil else { throw LocalStoreError.invalidMaintenanceRecord }
+      try run("UPDATE maintenance_record SET service_name = ?, completed_on = ?, milli_miles = ?, note = ?, updated_at = ? WHERE id = ? AND vehicle_id = ?", [.text(normalizedName), .text(completedOn), .integer(milliMiles), note.map(Binding.text) ?? .text(""), .integer(now), .integer(id), .integer(vehicleId)])
+      if note == nil { try run("UPDATE maintenance_record SET note = NULL WHERE id = ?", [.integer(id)]) }
+    }
+    guard let record = try maintenanceRecords(for: vehicleId).first(where: { $0.id == id }) else { throw LocalStoreError.sqlite("Maintenance record disappeared after update") }
+    return record
+  }
+
+  public func deleteMaintenanceRecord(id: Int64) throws {
+    try transaction {
+      guard try queryOne("SELECT id FROM maintenance_record WHERE id = ?", [.integer(id)]) != nil else { throw LocalStoreError.invalidMaintenanceRecord }
+      try run("DELETE FROM maintenance_record WHERE id = ?", [.integer(id)])
+    }
   }
 
   public func vehicles(archived: Bool = false) throws -> [StoredGarageVehicle] {
@@ -578,6 +643,20 @@ let archivedGarageVehiclesQuery = """
   WHERE vehicle.archived_at IS NOT NULL
   ORDER BY vehicle.nickname COLLATE NOCASE, vehicle.id
   """
+
+private func validCivilDate(_ value: String) -> Bool {
+  guard value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else { return false }
+  let parts = value.split(separator: "-").compactMap { Int($0) }
+  guard parts.count == 3 else { return false }
+  var components = DateComponents()
+  components.calendar = Calendar(identifier: .gregorian)
+  components.year = parts[0]
+  components.month = parts[1]
+  components.day = parts[2]
+  guard let date = components.calendar?.date(from: components) else { return false }
+  let resolved = components.calendar?.dateComponents([.year, .month, .day], from: date)
+  return resolved?.year == parts[0] && resolved?.month == parts[1] && resolved?.day == parts[2]
+}
 
 private let schemaV1 = """
 CREATE TABLE installation_state (

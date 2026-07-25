@@ -122,6 +122,26 @@ public class MaintenanceStoreModule: Module {
       try self.localStore().removeHeroPhoto(for: nativeVehicleId, in: try self.photoDirectory())
     }
 
+    AsyncFunction("getMaintenanceRecords") { (vehicleId: String) throws -> [[String: Any]] in
+      guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidMaintenanceRecord }
+      return try self.localStore().maintenanceRecords(for: nativeVehicleId).map(Self.maintenanceRecordDictionary)
+    }
+
+    AsyncFunction("createMaintenanceRecord") { (vehicleId: String, serviceName: String, completedOn: String, milliMiles: String, note: String?) throws -> [String: Any] in
+      guard let nativeVehicleId = Int64(vehicleId), let nativeMilliMiles = Int64(milliMiles), nativeMilliMiles >= 0 else { throw LocalStoreError.invalidMaintenanceRecord }
+      return try Self.maintenanceRecordDictionary(self.localStore().createMaintenanceRecord(vehicleId: nativeVehicleId, serviceName: serviceName, completedOn: completedOn, milliMiles: nativeMilliMiles, note: note, now: Self.now()))
+    }
+
+    AsyncFunction("updateMaintenanceRecord") { (recordId: String, vehicleId: String, serviceName: String, completedOn: String, milliMiles: String, note: String?) throws -> [String: Any] in
+      guard let nativeRecordId = Int64(recordId), let nativeVehicleId = Int64(vehicleId), let nativeMilliMiles = Int64(milliMiles), nativeMilliMiles >= 0 else { throw LocalStoreError.invalidMaintenanceRecord }
+      return try Self.maintenanceRecordDictionary(self.localStore().updateMaintenanceRecord(id: nativeRecordId, vehicleId: nativeVehicleId, serviceName: serviceName, completedOn: completedOn, milliMiles: nativeMilliMiles, note: note, now: Self.now()))
+    }
+
+    AsyncFunction("deleteMaintenanceRecord") { (recordId: String) throws -> Void in
+      guard let nativeRecordId = Int64(recordId) else { throw LocalStoreError.invalidMaintenanceRecord }
+      try self.localStore().deleteMaintenanceRecord(id: nativeRecordId)
+    }
+
     AsyncFunction("getTrackingSnapshot") { () throws -> [String: String] in
       ["state": try self.localStore().trackingState()]
     }
@@ -240,5 +260,15 @@ public class MaintenanceStoreModule: Module {
       "trackingReadiness": vehicle.trackingReadiness,
       "heroPhotoUri": photoURI as Any,
     ]
+  }
+
+  private static func maintenanceRecordDictionary(_ record: StoredMaintenanceRecord) -> [String: Any] {
+    var result: [String: Any] = [
+      "id": String(record.id), "vehicleId": String(record.vehicleId), "serviceName": record.serviceName,
+      "completedOn": record.completedOn, "milliMiles": String(record.milliMiles),
+    ]
+    if let scheduleId = record.scheduleId { result["scheduleId"] = String(scheduleId) }
+    if let note = record.note { result["note"] = note }
+    return result
   }
 }

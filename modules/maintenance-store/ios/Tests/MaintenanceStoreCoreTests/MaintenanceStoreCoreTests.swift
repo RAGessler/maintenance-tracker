@@ -206,6 +206,60 @@ func rejectsInvalidVehicleEdit() throws {
   #expect(try store.vehicles().first?.nickname == "Daily")
 }
 
+@Test("maintenance records support CRUD, civil dates, exact mileage, and newest-first history")
+func managesMaintenanceRecords() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 42_000_000, now: 2)
+
+  let older = try store.createMaintenanceRecord(vehicleId: vehicle.id, serviceName: "Tire rotation", completedOn: "2025-12-31", milliMiles: 42_125_001, note: "Front to rear", now: 3)
+  let newer = try store.createMaintenanceRecord(vehicleId: vehicle.id, serviceName: "Oil change", completedOn: "2026-01-01", milliMiles: 42_125_999, note: nil, now: 4)
+  let annual = try store.createMaintenanceRecord(vehicleId: vehicle.id, serviceName: "Annual inspection", completedOn: "2024-02-29", milliMiles: 42_000_000, note: nil, now: 5)
+  #expect(try store.maintenanceRecords(for: vehicle.id).map(\.id) == [newer.id, older.id, annual.id])
+  #expect(newer.milliMiles == 42_125_999)
+  #expect(newer.note == nil)
+
+  let edited = try store.updateMaintenanceRecord(id: older.id, vehicleId: vehicle.id, serviceName: "Rotation", completedOn: "2026-02-28", milliMiles: 42_126_001, note: "Updated", now: 6)
+  #expect(edited.id == older.id)
+  #expect(try store.maintenanceRecords(for: vehicle.id).first?.serviceName == "Rotation")
+
+  try store.deleteMaintenanceRecord(id: newer.id)
+  #expect(try store.maintenanceRecords(for: vehicle.id).map(\.id) == [older.id, annual.id])
+}
+
+@Test("maintenance records reject invalid civil dates and negative mileage atomically")
+func rejectsInvalidMaintenanceRecords() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+
+  #expect(throws: LocalStoreError.invalidMaintenanceRecord) {
+    try store.createMaintenanceRecord(vehicleId: vehicle.id, serviceName: "Oil", completedOn: "2026-02-30", milliMiles: 0, note: nil, now: 3)
+  }
+  #expect(throws: LocalStoreError.invalidMaintenanceRecord) {
+    try store.createMaintenanceRecord(vehicleId: vehicle.id, serviceName: "Oil", completedOn: "2026-01-00", milliMiles: 0, note: nil, now: 3)
+  }
+  #expect(throws: LocalStoreError.invalidMaintenanceRecord) {
+    try store.createMaintenanceRecord(vehicleId: vehicle.id, serviceName: "Oil", completedOn: "2026-02-28", milliMiles: -1, note: nil, now: 3)
+  }
+  #expect(try store.maintenanceRecords(for: vehicle.id).isEmpty)
+}
+
+@Test("maintenance records survive a store relaunch")
+func retainsMaintenanceRecordsAcrossRelaunch() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+  _ = try store.createMaintenanceRecord(vehicleId: vehicle.id, serviceName: "Inspection", completedOn: "2026-07-25", milliMiles: 1_234_567, note: "Passed", now: 3)
+  store.close()
+
+  let reopenedStore = try LocalStore(path: databaseURL.path)
+  #expect(try reopenedStore.maintenanceRecords(for: vehicle.id).first?.milliMiles == 1_234_567)
+}
+
 @Test("the v1 schema accepts only approved durable trip codes")
 func constrainsPersistedTripCodes() throws {
   let directoryURL = FileManager.default.temporaryDirectory

@@ -27,6 +27,26 @@ export type ReplaceHeroPhotoInput = Readonly<{
   sourceUri: string;
 }>;
 
+export type MaintenanceRecord = Readonly<{
+  id: string;
+  vehicleId: string;
+  scheduleId?: string;
+  serviceName: string;
+  completedOn: string;
+  milliMiles: string;
+  note?: string;
+}>;
+
+export type CreateMaintenanceRecordInput = Readonly<{
+  vehicleId: string;
+  serviceName: string;
+  completedOn: string;
+  milliMiles: string;
+  note?: string;
+}>;
+
+export type UpdateMaintenanceRecordInput = CreateMaintenanceRecordInput & Readonly<{ id: string }>;
+
 export type Bootstrap = Readonly<{
   disclosureAccepted: boolean;
   disclosureVersion: number;
@@ -73,6 +93,10 @@ export interface NativeMaintenanceStore {
   restoreVehicle(vehicleId: string): Promise<void>;
   replaceHeroPhoto?(vehicleId: string, sourceUri: string): Promise<void>;
   removeHeroPhoto?(vehicleId: string): Promise<void>;
+  getMaintenanceRecords?(vehicleId: string): Promise<MaintenanceRecord[]>;
+  createMaintenanceRecord?(vehicleId: string, serviceName: string, completedOn: string, milliMiles: string, note?: string): Promise<MaintenanceRecord>;
+  updateMaintenanceRecord?(id: string, vehicleId: string, serviceName: string, completedOn: string, milliMiles: string, note?: string): Promise<MaintenanceRecord>;
+  deleteMaintenanceRecord?(id: string): Promise<void>;
 }
 
 export type MaintenanceStore = Readonly<{
@@ -89,6 +113,10 @@ export type MaintenanceStore = Readonly<{
     restoreVehicle(vehicleId: string): Promise<void>;
     replaceHeroPhoto(input: ReplaceHeroPhotoInput): Promise<void>;
     removeHeroPhoto(vehicleId: string): Promise<void>;
+    getMaintenanceRecords(vehicleId: string): Promise<MaintenanceRecord[]>;
+    createMaintenanceRecord(input: CreateMaintenanceRecordInput): Promise<MaintenanceRecord>;
+    updateMaintenanceRecord(input: UpdateMaintenanceRecordInput): Promise<MaintenanceRecord>;
+    deleteMaintenanceRecord(recordId: string): Promise<void>;
   }>;
   tracking: Readonly<{
     getSnapshot(): Promise<TrackingSnapshot>;
@@ -138,6 +166,22 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
           return Promise.reject(new Error('Rebuild the iOS development client to manage hero photos.'));
         }
         return native.removeHeroPhoto(vehicleId);
+      },
+      getMaintenanceRecords: (vehicleId) => {
+        if (typeof native.getMaintenanceRecords !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to load maintenance history.'));
+        return native.getMaintenanceRecords(vehicleId);
+      },
+      createMaintenanceRecord: (input) => {
+        if (typeof native.createMaintenanceRecord !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage maintenance history.'));
+        return native.createMaintenanceRecord(input.vehicleId, input.serviceName, input.completedOn, input.milliMiles, input.note);
+      },
+      updateMaintenanceRecord: (input) => {
+        if (typeof native.updateMaintenanceRecord !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage maintenance history.'));
+        return native.updateMaintenanceRecord(input.id, input.vehicleId, input.serviceName, input.completedOn, input.milliMiles, input.note);
+      },
+      deleteMaintenanceRecord: (recordId) => {
+        if (typeof native.deleteMaintenanceRecord !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage maintenance history.'));
+        return native.deleteMaintenanceRecord(recordId);
       },
     },
     tracking: {
