@@ -379,6 +379,8 @@ CREATE TABLE tracking_session (
   corroboration_observed INTEGER NOT NULL CHECK(corroboration_observed IN (0, 1)), movement_observed INTEGER NOT NULL CHECK(movement_observed IN (0, 1)), cumulative_milli_miles INTEGER NOT NULL CHECK(cumulative_milli_miles >= 0),
   quality_counters_json TEXT NOT NULL, first_fix_blob BLOB, last_fix_blob BLOB
 );
+CREATE INDEX tracking_session_intended_vehicle ON tracking_session(intended_vehicle_id);
+CREATE INDEX tracking_session_trigger_configuration ON tracking_session(trigger_configuration_id);
 CREATE TABLE diagnostic_event (
   id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
   severity TEXT NOT NULL, category TEXT NOT NULL, event_code TEXT NOT NULL, vehicle_id INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,
