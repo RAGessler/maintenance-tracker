@@ -41,7 +41,6 @@ public final class LocalStore: @unchecked Sendable {
       throw LocalStoreError.sqlite("Unable to open the local store")
     }
     database = connection
-    try configure(connection)
     try migrate(connection)
   }
 
@@ -183,19 +182,22 @@ public final class LocalStore: @unchecked Sendable {
   }
 
   private func configure(_ connection: OpaquePointer) throws {
+    try execute("PRAGMA busy_timeout = 5000")
     try execute("PRAGMA foreign_keys = ON")
     try execute("PRAGMA journal_mode = WAL")
-    try execute("PRAGMA busy_timeout = 5000")
     try execute("PRAGMA synchronous = FULL")
   }
 
   private func migrate(_ connection: OpaquePointer) throws {
-    let version = Int(try scalarInt64("PRAGMA user_version", []))
-    guard version <= Self.currentSchemaVersion else {
-      throw LocalStoreError.unsupportedSchema(version)
-    }
-    if version == 0 {
-      try transaction {
+    Self.writeLock.lock()
+    defer { Self.writeLock.unlock() }
+    try configure(connection)
+    try transactionLocked {
+      let version = Int(try scalarInt64("PRAGMA user_version", []))
+      guard version <= Self.currentSchemaVersion else {
+        throw LocalStoreError.unsupportedSchema(version)
+      }
+      if version == 0 {
         try execute(schemaV1)
         try execute("PRAGMA user_version = 1")
         try validateForeignKeys()
@@ -206,6 +208,10 @@ public final class LocalStore: @unchecked Sendable {
   private func transaction(_ body: () throws -> Void) throws {
     Self.writeLock.lock()
     defer { Self.writeLock.unlock() }
+    try transactionLocked(body)
+  }
+
+  private func transactionLocked(_ body: () throws -> Void) throws {
     try execute("BEGIN IMMEDIATE")
     do {
       try body()

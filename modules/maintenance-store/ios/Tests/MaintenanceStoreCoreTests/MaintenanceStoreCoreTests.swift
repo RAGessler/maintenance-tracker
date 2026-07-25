@@ -48,6 +48,26 @@ func returnsVehicleIdentifierFromItsTransaction() async throws {
   }
 }
 
+@Test("concurrent store opens migrate only once")
+func serializesInitialMigration() async throws {
+  let directoryURL = FileManager.default.temporaryDirectory
+    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+  try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer {
+    try? FileManager.default.removeItem(at: directoryURL)
+  }
+
+  try await withThrowingTaskGroup(of: Void.self) { group in
+    for _ in 0..<20 {
+      group.addTask {
+        _ = try LocalStore(path: databaseURL.path)
+      }
+    }
+    try await group.waitForAll()
+  }
+}
+
 @Test("tracking state is temporary and is cleared when a session stops")
 func clearsTemporaryTrackingState() throws {
   let store = try LocalStore(path: ":memory:")
