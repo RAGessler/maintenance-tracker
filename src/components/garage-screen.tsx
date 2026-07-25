@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 import { Link, type Href, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { ActionSheetIOS, Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
@@ -9,7 +9,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ScheduleManager } from '@/features/schedules/schedule-manager';
 import { Spacing, TorqueColors } from '@/constants/theme';
-import { maintenanceStore, type GarageVehicle } from '../../modules/maintenance-store';
+import { maintenanceStore, type GarageVehicle, type ManualOdometerReading } from '../../modules/maintenance-store';
 
 type Draft = Readonly<{ nickname: string; year: string; make: string; model: string; odometer: string }>;
 const emptyDraft: Draft = { nickname: '', year: '', make: '', model: '', odometer: '' };
@@ -167,11 +167,57 @@ function VehicleEditor({ vehicle, onCancel, onChanged, openScheduleId }: Readonl
     <ThemedText style={styles.formIntro}>Identity fields can be changed here. Odometer readings remain an auditable history and are updated separately.</ThemedText>
     <Pressable accessibilityRole="button" accessibilityLabel="Hero photo" accessibilityHint="Opens photo options" onPress={photoOptions} style={styles.photoPanel}>{vehicle.heroPhotoUri ? <Image source={{ uri: vehicle.heroPhotoUri }} style={styles.photoPreview} accessibilityLabel={`${vehicle.nickname} hero photo`} /> : <SymbolView name={{ ios: 'photo.badge.plus', android: 'add_a_photo', web: 'image' }} tintColor={TorqueColors.primary} size={28} />}<ThemedText style={styles.photoTitle}>{vehicle.heroPhotoUri ? 'Hero photo' : 'Add a hero photo'}</ThemedText></Pressable>
     <View style={styles.fieldGroup}><Field label="Nickname" value={draft.nickname} onChangeText={(nickname) => setDraft({ ...draft, nickname })} /><Field label="Year" value={draft.year} onChangeText={(year) => setDraft({ ...draft, year })} keyboardType="number-pad" /><Field label="Make" value={draft.make} onChangeText={(make) => setDraft({ ...draft, make })} /><Field label="Model" value={draft.model} onChangeText={(model) => setDraft({ ...draft, model })} /></View>
-    <View style={styles.readOnlyRow}><ThemedText style={styles.fieldLabel}>Current manual odometer</ThemedText><ThemedText>{formatMiles(vehicle.currentOdometerMilliMiles)} mi</ThemedText></View>
+    <OdometerReadingManager vehicle={vehicle} onChanged={onChanged} />
     <ScheduleManager vehicleId={vehicle.id} currentOdometerMilliMiles={vehicle.currentOdometerMilliMiles} highlightedScheduleId={openScheduleId} />
     {error && <ThemedText style={styles.error} accessibilityLiveRegion="polite">{error}</ThemedText>}
     <ActionButton label="Archive vehicle" onPress={archive} />
   </ScrollView></SafeAreaView></ThemedView>;
+}
+
+function OdometerReadingManager({ vehicle, onChanged }: Readonly<{ vehicle: GarageVehicle; onChanged: () => void }>) {
+  const [adding, setAdding] = useState(false);
+  const [readings, setReadings] = useState<ManualOdometerReading[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const load = useEffectEvent(() => {
+    setLoading(true);
+    maintenanceStore.product.getManualOdometerReadings(vehicle.id).then(setReadings).catch(() => setError('Odometer history could not be loaded. Try again.')).finally(() => setLoading(false));
+  });
+  useEffect(() => {
+    const task = setTimeout(load, 0);
+    return () => clearTimeout(task);
+  }, [vehicle.id, reloadKey]);
+  if (adding) return <OdometerReadingForm vehicle={vehicle} onCancel={() => setAdding(false)} onSaved={() => { setAdding(false); setReloadKey((key) => key + 1); onChanged(); }} />;
+  return <View style={styles.odometerSection}>
+    <View style={styles.readOnlyRow}><View><ThemedText style={styles.fieldLabel}>Estimated odometer</ThemedText><ThemedText>{formatMiles(vehicle.currentOdometerMilliMiles)} mi</ThemedText></View><Pressable accessibilityRole="button" accessibilityLabel="Add odometer reading" onPress={() => setAdding(true)}><ThemedText type="linkPrimary">Odometer reading</ThemedText></Pressable></View>
+    <ThemedText style={styles.formIntro}>A dashboard reading becomes the current baseline. Earlier trips and maintenance remain unchanged.</ThemedText>
+    <ThemedText accessibilityRole="header" style={styles.historyTitle}>Odometer history</ThemedText>
+    {loading ? <ThemedText>Loading odometer history...</ThemedText> : error ? <ThemedText accessibilityLiveRegion="polite" style={styles.error}>{error}</ThemedText> : readings.map((reading) => <View key={reading.id} style={styles.historyRow}><ThemedText>{formatDate(reading.effectiveAt)}</ThemedText><ThemedText>{formatMiles(reading.milliMiles)} mi</ThemedText></View>)}
+  </View>;
+}
+
+function OdometerReadingForm({ vehicle, onCancel, onSaved }: Readonly<{ vehicle: GarageVehicle; onCancel: () => void; onSaved: () => void }>) {
+  const [miles, setMiles] = useState(formatMiles(vehicle.currentOdometerMilliMiles));
+  const [date, setDate] = useState(civilToday());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const valid = isMileage(miles) && isCivilDate(date);
+  const save = async () => {
+    if (!valid) return;
+    const submit = async () => {
+      setSaving(true); setError(null);
+      try { await maintenanceStore.product.appendManualOdometerReading({ vehicleId: vehicle.id, milliMiles: toMilliMiles(miles), effectiveAt: String(new Date(`${date}T12:00:00`).getTime()) }); onSaved(); }
+      catch { setError('The odometer reading could not be saved. Your entry is still here.'); }
+      finally { setSaving(false); }
+    };
+    if (BigInt(toMilliMiles(miles)) < BigInt(vehicle.currentOdometerMilliMiles)) {
+      Alert.alert('This reading is lower than your estimate', 'Save it only if the dashboard reading is correct. This adds a new baseline and does not delete prior history.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Save lower reading', style: 'destructive', onPress: () => void submit() }]);
+      return;
+    }
+    await submit();
+  };
+  return <ThemedView style={styles.screen}><SafeAreaView style={styles.safeArea}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"><View style={styles.formNavigation}><Pressable accessibilityRole="button" onPress={onCancel}><ThemedText style={styles.navigationAction}>Cancel</ThemedText></Pressable><ThemedText accessibilityRole="header" style={styles.formTitle}>Odometer reading</ThemedText><Pressable accessibilityRole="button" accessibilityState={{ disabled: !valid || saving }} disabled={!valid || saving} onPress={() => void save()}><ThemedText style={[styles.navigationAction, (!valid || saving) && styles.disabled]}>Save</ThemedText></Pressable></View><ThemedText style={styles.formIntro}>Enter the dashboard reading. Saving adds an auditable row; it never changes an earlier reading.</ThemedText><View style={styles.fieldGroup}><Field label="Reading date (YYYY-MM-DD)" value={date} onChangeText={setDate} keyboardType="numbers-and-punctuation" error={date && !isCivilDate(date) ? 'Enter a valid calendar date.' : undefined} /><Field label="Odometer (mi)" value={miles} onChangeText={setMiles} keyboardType="decimal-pad" error={miles && !isMileage(miles) ? 'Enter a non-negative mileage with up to three decimal places.' : undefined} /></View>{error ? <ThemedText accessibilityLiveRegion="polite" style={styles.error}>{error}</ThemedText> : null}</ScrollView></SafeAreaView></ThemedView>;
 }
 
 function VehicleForm({ onCancel, onCreated }: Readonly<{ onCancel: () => void; onCreated: (vehicle: GarageVehicle) => void }>) {
@@ -232,14 +278,17 @@ function validate(draft: Draft) {
   return isMileage(draft.odometer) ? null : 'odometer';
 }
 
-function isMileage(value: string) { return /^\d+$/.test(value.trim()); }
-function toMilliMiles(value: string) { return (BigInt(value.trim()) * 1_000n).toString(); }
-function formatMiles(milliMiles: string) { return (BigInt(milliMiles) / 1_000n).toLocaleString(); }
+function isMileage(value: string) { return /^\d+(\.\d{1,3})?$/.test(value.trim()); }
+function toMilliMiles(value: string) { const [whole, fraction = ''] = value.trim().split('.'); return (BigInt(whole) * 1_000n + BigInt(fraction.padEnd(3, '0'))).toString(); }
+function formatMiles(milliMiles: string) { const miles = BigInt(milliMiles); const whole = miles / 1_000n; const fraction = (miles % 1_000n).toString().padStart(3, '0').replace(/0+$/, ''); return `${whole.toLocaleString()}${fraction ? `.${fraction}` : ''}`; }
+function civilToday() { return new Date().toISOString().slice(0, 10); }
+function isCivilDate(value: string) { const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value); if (!match) return false; const date = new Date(`${value}T12:00:00`); return !Number.isNaN(date.getTime()) && date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3]); }
+function formatDate(effectiveAt: string) { return new Date(Number(effectiveAt)).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas }, safeArea: { flex: 1 }, content: { padding: Spacing.four, gap: Spacing.three }, pageTitle: { color: TorqueColors.text, fontSize: 34, lineHeight: 41, fontWeight: '700' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: Spacing.three, minHeight: 480 }, emptyIcon: { width: 84, height: 84, borderRadius: 42, backgroundColor: '#E5F1FF', alignItems: 'center', justifyContent: 'center' }, emptyTitle: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, emptyCopy: { color: TorqueColors.secondary, fontSize: 15, lineHeight: 21, textAlign: 'center', maxWidth: 300 }, list: { gap: Spacing.three },
-  vehicleCard: { borderRadius: 18, overflow: 'hidden', backgroundColor: TorqueColors.card }, vehicleHero: { height: 150, backgroundColor: '#E8F2FC', alignItems: 'center', justifyContent: 'center' }, vehicleDetails: { padding: Spacing.three, gap: Spacing.half }, vehicleName: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, vehicleModel: { color: TorqueColors.text, fontSize: 16 }, vehicleMileage: { color: TorqueColors.secondary, fontSize: 13 }, sectionTitle: { color: TorqueColors.text, fontSize: 20, fontWeight: '700', marginTop: Spacing.two }, archivedCard: { borderRadius: 16, backgroundColor: TorqueColors.card, padding: Spacing.three, gap: Spacing.two }, archivedDetails: { gap: Spacing.half }, readOnlyRow: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, padding: Spacing.three, gap: Spacing.one },
+  vehicleCard: { borderRadius: 18, overflow: 'hidden', backgroundColor: TorqueColors.card }, vehicleHero: { height: 150, backgroundColor: '#E8F2FC', alignItems: 'center', justifyContent: 'center' }, vehicleDetails: { padding: Spacing.three, gap: Spacing.half }, vehicleName: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, vehicleModel: { color: TorqueColors.text, fontSize: 16 }, vehicleMileage: { color: TorqueColors.secondary, fontSize: 13 }, sectionTitle: { color: TorqueColors.text, fontSize: 20, fontWeight: '700', marginTop: Spacing.two }, archivedCard: { borderRadius: 16, backgroundColor: TorqueColors.card, padding: Spacing.three, gap: Spacing.two }, archivedDetails: { gap: Spacing.half }, readOnlyRow: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, padding: Spacing.three, gap: Spacing.one, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, odometerSection: { gap: Spacing.two }, historyTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700', marginTop: Spacing.one }, historyRow: { borderRadius: Spacing.two, backgroundColor: TorqueColors.card, padding: Spacing.two, flexDirection: 'row', justifyContent: 'space-between' },
   formNavigation: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, formTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700' }, navigationAction: { color: TorqueColors.primary, fontSize: 17 }, photoPanel: { minHeight: 132, borderRadius: Spacing.three, borderWidth: 1, borderColor: TorqueColors.divider, backgroundColor: TorqueColors.card, alignItems: 'center', justifyContent: 'center', gap: Spacing.one, overflow: 'hidden' }, photoPreview: { width: '100%', height: 132 }, photoTitle: { color: TorqueColors.primary, fontSize: 16, fontWeight: '600' }, photoDetail: { color: TorqueColors.secondary, fontSize: 13 }, formIntro: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 }, fieldGroup: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, paddingHorizontal: Spacing.three }, field: { gap: Spacing.one, paddingVertical: Spacing.two, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider }, fieldLabel: { color: TorqueColors.text, fontSize: 13, fontWeight: '600' },
   input: { minHeight: 30, paddingVertical: Spacing.one, fontSize: 17, color: TorqueColors.text }, action: { minHeight: 48, borderRadius: 12, backgroundColor: TorqueColors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.three }, actionText: { color: '#FFFFFF', fontWeight: '700' }, error: { color: TorqueColors.error }, disabled: { opacity: 0.45 },
 });

@@ -32,8 +32,14 @@ public struct StoredGarageVehicle: Sendable, Equatable {
 }
 
 public struct ManualOdometerReading: Sendable, Equatable {
+  public let id: Int64
   public let milliMiles: Int64
   public let effectiveAt: Int64
+}
+
+public struct ConfirmedTripDistance: Sendable, Equatable {
+  public let endedAt: Int64
+  public let effectiveMilliMiles: Int64
 }
 
 public struct StoredMaintenanceRecord: Sendable, Equatable {
@@ -169,14 +175,63 @@ public final class LocalStore: @unchecked Sendable {
   public func latestManualOdometer(for vehicleId: Int64) throws -> ManualOdometerReading? {
     guard let row = try queryOne(
       """
-      SELECT milli_miles, effective_at FROM manual_odometer_reading
+      SELECT id, milli_miles, effective_at FROM manual_odometer_reading
       WHERE vehicle_id = ? ORDER BY effective_at DESC, id DESC LIMIT 1
       """,
       [.integer(vehicleId)]
     ) else {
       return nil
     }
-    return ManualOdometerReading(milliMiles: row[0], effectiveAt: row[1])
+    return ManualOdometerReading(id: row[0], milliMiles: row[1], effectiveAt: row[2])
+  }
+
+  public func manualOdometerReadings(for vehicleId: Int64) throws -> [ManualOdometerReading] {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    let sql = "SELECT id, milli_miles, effective_at FROM manual_odometer_reading WHERE vehicle_id = ? ORDER BY effective_at DESC, id DESC"
+    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw failure(database) }
+    defer { sqlite3_finalize(statement) }
+    try bind([.integer(vehicleId)], to: statement)
+    var readings: [ManualOdometerReading] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      readings.append(ManualOdometerReading(
+        id: sqlite3_column_int64(statement, 0), milliMiles: sqlite3_column_int64(statement, 1), effectiveAt: sqlite3_column_int64(statement, 2)
+      ))
+    }
+    return readings
+  }
+
+  public func appendManualOdometerReading(vehicleId: Int64, milliMiles: Int64, effectiveAt: Int64, now: Int64) throws -> ManualOdometerReading {
+    guard milliMiles >= 0 else { throw LocalStoreError.invalidVehicle }
+    var readingId: Int64 = 0
+    try transaction {
+      try requireAcceptedDisclosure()
+      guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
+        throw LocalStoreError.invalidVehicle
+      }
+      readingId = try insert(
+        "INSERT INTO manual_odometer_reading (vehicle_id, effective_at, milli_miles, origin, created_at) VALUES (?, ?, ?, 'manual', ?)",
+        [.integer(vehicleId), .integer(effectiveAt), .integer(milliMiles), .integer(now)]
+      )
+    }
+    guard let reading = try manualOdometerReadings(for: vehicleId).first(where: { $0.id == readingId }) else {
+      throw LocalStoreError.sqlite("Manual odometer transaction did not return a reading")
+    }
+    return reading
+  }
+
+  public func confirmedTripDistances(for vehicleId: Int64) throws -> [ConfirmedTripDistance] {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    let sql = "SELECT trip.ended_at, trip_state.effective_milli_miles FROM trip JOIN trip_state ON trip_state.trip_id = trip.id WHERE trip_state.vehicle_id = ? AND trip_state.disposition = 'confirmed' ORDER BY trip.ended_at, trip.id"
+    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw failure(database) }
+    defer { sqlite3_finalize(statement) }
+    try bind([.integer(vehicleId)], to: statement)
+    var trips: [ConfirmedTripDistance] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      trips.append(ConfirmedTripDistance(endedAt: sqlite3_column_int64(statement, 0), effectiveMilliMiles: sqlite3_column_int64(statement, 1)))
+    }
+    return trips
   }
 
   public func maintenanceRecords(for vehicleId: Int64) throws -> [StoredMaintenanceRecord] {

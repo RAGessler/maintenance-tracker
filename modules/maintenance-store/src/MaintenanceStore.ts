@@ -37,6 +37,24 @@ export type MaintenanceRecord = Readonly<{
   note?: string;
 }>;
 
+export type ManualOdometerReading = Readonly<{
+  id: string;
+  vehicleId: string;
+  milliMiles: string;
+  effectiveAt: string;
+}>;
+
+export type AppendManualOdometerReadingInput = Readonly<{
+  vehicleId: string;
+  milliMiles: string;
+  effectiveAt: string;
+}>;
+
+export type OdometerFacts = Readonly<{
+  readings: ManualOdometerReading[];
+  trips: ReadonlyArray<Readonly<{ endedAt: string; effectiveMilliMiles: string }>>;
+}>;
+
 export type MaintenanceSchedule = Readonly<{
   id: string;
   vehicleId: string;
@@ -117,6 +135,9 @@ export interface NativeMaintenanceStore {
   restoreVehicle(vehicleId: string): Promise<void>;
   replaceHeroPhoto?(vehicleId: string, sourceUri: string): Promise<void>;
   removeHeroPhoto?(vehicleId: string): Promise<void>;
+  getManualOdometerReadings?(vehicleId: string): Promise<ManualOdometerReading[]>;
+  appendManualOdometerReading?(vehicleId: string, milliMiles: string, effectiveAt: string): Promise<ManualOdometerReading>;
+  getOdometerFacts?(vehicleId: string): Promise<OdometerFacts>;
   getMaintenanceRecords?(vehicleId: string): Promise<MaintenanceRecord[]>;
   createMaintenanceRecord?(vehicleId: string, serviceName: string, completedOn: string, milliMiles: string, note?: string): Promise<MaintenanceRecord>;
   updateMaintenanceRecord?(id: string, vehicleId: string, serviceName: string, completedOn: string, milliMiles: string, note?: string): Promise<MaintenanceRecord>;
@@ -134,7 +155,7 @@ export type MaintenanceStore = Readonly<{
     getRecoveryState(): Promise<RecoveryState>;
     acceptDisclosure(version: number): Promise<Bootstrap>;
     deleteAllData(): Promise<Bootstrap>;
-    getVehicles(): Promise<GarageVehicle[]>;
+  getVehicles(): Promise<GarageVehicle[]>;
     getArchivedVehicles(): Promise<GarageVehicle[]>;
     createVehicle(input: CreateVehicleInput): Promise<Vehicle>;
     updateVehicle(input: UpdateVehicleInput): Promise<Vehicle>;
@@ -142,6 +163,8 @@ export type MaintenanceStore = Readonly<{
     restoreVehicle(vehicleId: string): Promise<void>;
     replaceHeroPhoto(input: ReplaceHeroPhotoInput): Promise<void>;
     removeHeroPhoto(vehicleId: string): Promise<void>;
+    getManualOdometerReadings(vehicleId: string): Promise<ManualOdometerReading[]>;
+    appendManualOdometerReading(input: AppendManualOdometerReadingInput): Promise<ManualOdometerReading>;
     getMaintenanceRecords(vehicleId: string): Promise<MaintenanceRecord[]>;
     createMaintenanceRecord(input: CreateMaintenanceRecordInput): Promise<MaintenanceRecord>;
     completeMaintenanceSchedule(input: CompleteMaintenanceScheduleInput): Promise<MaintenanceRecord>;
@@ -160,6 +183,11 @@ export type MaintenanceStore = Readonly<{
 }>;
 
 export function createMaintenanceStore(native: NativeMaintenanceStore): MaintenanceStore {
+  const estimateVehicles = async (vehicles: GarageVehicle[]) => Promise.all(vehicles.map(async (vehicle) => {
+    if (typeof native.getOdometerFacts !== 'function') return vehicle;
+    const facts = await native.getOdometerFacts(vehicle.id);
+    return { ...vehicle, currentOdometerMilliMiles: calculateEstimatedOdometer(facts) };
+  }));
   return {
     product: {
       getBootstrap: () => native.getBootstrap(),
@@ -170,13 +198,13 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
         if (typeof native.getVehicles !== 'function') {
           return Promise.reject(new Error('Rebuild the iOS development client to load Garage vehicles.'));
         }
-        return native.getVehicles();
+        return native.getVehicles().then(estimateVehicles);
       },
       getArchivedVehicles: () => {
         if (typeof native.getArchivedVehicles !== 'function') {
           return Promise.reject(new Error('Rebuild the iOS development client to load archived vehicles.'));
         }
-        return native.getArchivedVehicles();
+        return native.getArchivedVehicles().then(estimateVehicles);
       },
       createVehicle: (input) =>
         native.createVehicle(
@@ -200,6 +228,14 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
           return Promise.reject(new Error('Rebuild the iOS development client to manage hero photos.'));
         }
         return native.removeHeroPhoto(vehicleId);
+      },
+      getManualOdometerReadings: (vehicleId) => {
+        if (typeof native.getManualOdometerReadings !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to load odometer history.'));
+        return native.getManualOdometerReadings(vehicleId);
+      },
+      appendManualOdometerReading: (input) => {
+        if (typeof native.appendManualOdometerReading !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage odometer readings.'));
+        return native.appendManualOdometerReading(input.vehicleId, input.milliMiles, input.effectiveAt);
       },
       getMaintenanceRecords: (vehicleId) => {
         if (typeof native.getMaintenanceRecords !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to load maintenance history.'));
@@ -245,3 +281,4 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
     },
   };
 }
+import { calculateEstimatedOdometer } from '../../../src/features/odometer/reconciliation';

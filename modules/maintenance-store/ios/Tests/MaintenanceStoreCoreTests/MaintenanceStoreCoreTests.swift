@@ -194,6 +194,61 @@ func editsVehicleIdentity() throws {
   #expect(try store.latestManualOdometer(for: vehicle.id)?.milliMiles == 42_000_000)
 }
 
+@Test("manual odometer readings are append-only, ordered, and establish the current baseline")
+func appendsManualOdometerReadings() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(
+    nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 42_000_000, now: 100
+  )
+
+  let first = try store.appendManualOdometerReading(vehicleId: vehicle.id, milliMiles: 42_500_001, effectiveAt: 200, now: 201)
+  let correction = try store.appendManualOdometerReading(vehicleId: vehicle.id, milliMiles: 42_400_999, effectiveAt: 200, now: 202)
+
+  #expect(first.milliMiles == 42_500_001)
+  #expect(correction.milliMiles == 42_400_999)
+  #expect(try store.manualOdometerReadings(for: vehicle.id).map(\.milliMiles) == [42_400_999, 42_500_001, 42_000_000])
+  #expect(try store.latestManualOdometer(for: vehicle.id)?.milliMiles == 42_400_999)
+  #expect(try store.vehicles().first?.currentOdometerMilliMiles == 42_400_999)
+}
+
+@Test("manual odometer readings survive a store relaunch")
+func retainsManualOdometerReadingsAcrossRelaunch() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 42_000_000, now: 2)
+  _ = try store.appendManualOdometerReading(vehicleId: vehicle.id, milliMiles: 42_125_001, effectiveAt: 3, now: 4)
+  store.close()
+
+  let reopenedStore = try LocalStore(path: databaseURL.path)
+  #expect(try reopenedStore.manualOdometerReadings(for: vehicle.id).first?.milliMiles == 42_125_001)
+}
+
+@Test("estimated odometer includes only confirmed trips after its latest manual baseline")
+func reconcilesEstimatedOdometerFromAuditedFacts() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(
+    nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 42_000_000, now: 100
+  )
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+
+  try insertConfirmedTrip(database, vehicleID: vehicle.id, endedAt: 99, milliMiles: 900_000)
+  try insertConfirmedTrip(database, vehicleID: vehicle.id, endedAt: 100, milliMiles: 800_000)
+  try insertConfirmedTrip(database, vehicleID: vehicle.id, endedAt: 101, milliMiles: 1_234)
+  #expect(try store.confirmedTripDistances(for: vehicle.id).map(\.effectiveMilliMiles) == [900_000, 800_000, 1_234])
+
+  _ = try store.appendManualOdometerReading(vehicleId: vehicle.id, milliMiles: 43_000_001, effectiveAt: 102, now: 103)
+  #expect(try store.latestManualOdometer(for: vehicle.id)?.milliMiles == 43_000_001)
+}
+
 @Test("editing rejects invalid identity fields without partial changes")
 func rejectsInvalidVehicleEdit() throws {
   let store = try LocalStore(path: ":memory:")
@@ -524,6 +579,12 @@ private func insertTrip(
     )
     """
   )
+}
+
+private func insertConfirmedTrip(_ database: OpaquePointer, vehicleID: Int64, endedAt: Int64, milliMiles: Int64) throws {
+  #expect(execute(database, "INSERT INTO trip (source, proposed_vehicle_id, started_at, ended_at, captured_milli_miles, movement_outcome, normal_completion_outcome, route_corroboration_outcome, quality_counters_json) VALUES ('manual', \(vehicleID), \(endedAt - 1), \(endedAt), \(milliMiles), 'confirmed', 'explicit_end', 'not_required', '{}')") == SQLITE_OK)
+  let tripID = sqlite3_last_insert_rowid(database)
+  #expect(execute(database, "INSERT INTO trip_state (trip_id, vehicle_id, effective_milli_miles, disposition, updated_at) VALUES (\(tripID), \(vehicleID), \(milliMiles), 'confirmed', \(endedAt))") == SQLITE_OK)
 }
 
 private func insertRevision(

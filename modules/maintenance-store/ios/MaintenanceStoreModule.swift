@@ -122,6 +122,34 @@ public class MaintenanceStoreModule: Module {
       try self.localStore().removeHeroPhoto(for: nativeVehicleId, in: try self.photoDirectory())
     }
 
+    AsyncFunction("getManualOdometerReadings") { (vehicleId: String) throws -> [[String: Any]] in
+      guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidVehicle }
+      return try self.localStore().manualOdometerReadings(for: nativeVehicleId).map {
+        Self.manualOdometerReadingDictionary($0, vehicleId: nativeVehicleId)
+      }
+    }
+
+    AsyncFunction("appendManualOdometerReading") { (vehicleId: String, milliMiles: String, effectiveAt: String) throws -> [String: Any] in
+      guard let nativeVehicleId = Int64(vehicleId),
+            let nativeMilliMiles = Int64(milliMiles), nativeMilliMiles >= 0,
+            let nativeEffectiveAt = Int64(effectiveAt) else {
+        throw LocalStoreError.invalidVehicle
+      }
+      let reading = try self.localStore().appendManualOdometerReading(
+        vehicleId: nativeVehicleId, milliMiles: nativeMilliMiles, effectiveAt: nativeEffectiveAt, now: Self.now()
+      )
+      return Self.manualOdometerReadingDictionary(reading, vehicleId: nativeVehicleId)
+    }
+
+    AsyncFunction("getOdometerFacts") { (vehicleId: String) throws -> [String: Any] in
+      guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidVehicle }
+      let store = try self.localStore()
+      return [
+        "readings": try store.manualOdometerReadings(for: nativeVehicleId).map { Self.manualOdometerReadingDictionary($0, vehicleId: nativeVehicleId) },
+        "trips": try store.confirmedTripDistances(for: nativeVehicleId).map { ["endedAt": String($0.endedAt), "effectiveMilliMiles": String($0.effectiveMilliMiles)] },
+      ]
+    }
+
     AsyncFunction("getMaintenanceRecords") { (vehicleId: String) throws -> [[String: Any]] in
       guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidMaintenanceRecord }
       return try self.localStore().maintenanceRecords(for: nativeVehicleId).map(Self.maintenanceRecordDictionary)
@@ -301,6 +329,13 @@ public class MaintenanceStoreModule: Module {
     if let scheduleId = record.scheduleId { result["scheduleId"] = String(scheduleId) }
     if let note = record.note { result["note"] = note }
     return result
+  }
+
+  private static func manualOdometerReadingDictionary(_ reading: ManualOdometerReading, vehicleId: Int64) -> [String: Any] {
+    [
+      "id": String(reading.id), "vehicleId": String(vehicleId), "milliMiles": String(reading.milliMiles),
+      "effectiveAt": String(reading.effectiveAt),
+    ]
   }
 
   private static func optionalMilliMiles(_ value: String?) throws -> Int64? {

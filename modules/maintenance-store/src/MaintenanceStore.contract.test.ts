@@ -35,7 +35,7 @@ test('product-store creates a vehicle without exposing storage internals', async
 
   assert.deepEqual(vehicle, { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' });
   assert.deepEqual(calls, [['Daily', 2020, 'Honda', 'Civic', '42125000']]);
-  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'completeMaintenanceSchedule', 'createMaintenanceRecord', 'createMaintenanceSchedule', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'deleteMaintenanceSchedule', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getMaintenanceSchedules', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateMaintenanceSchedule', 'updateVehicle']);
+  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'appendManualOdometerReading', 'archiveVehicle', 'completeMaintenanceSchedule', 'createMaintenanceRecord', 'createMaintenanceSchedule', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'deleteMaintenanceSchedule', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getMaintenanceSchedules', 'getManualOdometerReadings', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateMaintenanceSchedule', 'updateVehicle']);
 });
 
 test('product-store exposes first-run state and garage vehicles without exposing persistence details', async () => {
@@ -65,7 +65,7 @@ test('product-store exposes first-run state and garage vehicles without exposing
   assert.deepEqual(await store.product.getVehicles(), [
     { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic', currentOdometerMilliMiles: '42125000', scheduleCount: 0, trackingReadiness: 'manual_only' },
   ]);
-  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'completeMaintenanceSchedule', 'createMaintenanceRecord', 'createMaintenanceSchedule', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'deleteMaintenanceSchedule', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getMaintenanceSchedules', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateMaintenanceSchedule', 'updateVehicle']);
+  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'appendManualOdometerReading', 'archiveVehicle', 'completeMaintenanceSchedule', 'createMaintenanceRecord', 'createMaintenanceSchedule', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'deleteMaintenanceSchedule', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getMaintenanceSchedules', 'getManualOdometerReadings', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateMaintenanceSchedule', 'updateVehicle']);
 });
 
 test('product-store reports when an installed development client lacks the garage bridge', async () => {
@@ -202,6 +202,37 @@ test('product-store forwards maintenance CRUD with civil dates and integer milea
     ['list', '7'], ['create', '7', 'Oil', '2026-07-25', '42125500', 'Synthetic'],
     ['update', '9', '7', 'Oil', '2026-07-25', '42125500', undefined], ['delete', '9'],
   ]);
+});
+
+test('product-store appends and lists auditable manual odometer readings', async () => {
+  const calls: unknown[][] = [];
+  const native = {
+    getBootstrap: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 2 }), getRecoveryState: async () => ({ state: 'ready' as const }), acceptDisclosure: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 2 }), deleteAllData: async () => ({ disclosureAccepted: false, disclosureVersion: 0, schemaVersion: 2 }),
+    createVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }), getVehicles: async () => [], getArchivedVehicles: async () => [], updateVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }), archiveVehicle: async () => {}, restoreVehicle: async () => {},
+    getManualOdometerReadings: async (...args: unknown[]) => { calls.push(['list', ...args]); return [{ id: '4', vehicleId: '7', milliMiles: '42125001', effectiveAt: '1753459200000' }]; },
+    appendManualOdometerReading: async (...args: unknown[]) => { calls.push(['append', ...args]); return { id: '4', vehicleId: '7', milliMiles: '42125001', effectiveAt: '1753459200000' }; },
+    getTrackingSnapshot: async () => ({ state: 'idle' as const }), startTracking: async () => ({ state: 'tracking' as const }), stopTracking: async () => ({ state: 'idle' as const }),
+  } as NativeMaintenanceStore;
+  const product = createMaintenanceStore(native).product;
+
+  await product.getManualOdometerReadings('7');
+  await product.appendManualOdometerReading({ vehicleId: '7', milliMiles: '42125001', effectiveAt: '1753459200000' });
+
+  assert.deepEqual(calls, [
+    ['list', '7'], ['append', '7', '42125001', '1753459200000'],
+  ]);
+});
+
+test('product-store derives garage mileage from auditable odometer facts', async () => {
+  const native = {
+    getBootstrap: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 2 }), getRecoveryState: async () => ({ state: 'ready' as const }), acceptDisclosure: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 2 }), deleteAllData: async () => ({ disclosureAccepted: false, disclosureVersion: 0, schemaVersion: 2 }),
+    createVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }), getArchivedVehicles: async () => [], updateVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }), archiveVehicle: async () => {}, restoreVehicle: async () => {},
+    getVehicles: async () => [{ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic', currentOdometerMilliMiles: '0', scheduleCount: 0, trackingReadiness: 'manual_only' as const }],
+    getOdometerFacts: async () => ({ readings: [{ id: '2', vehicleId: '7', milliMiles: '42125001', effectiveAt: '100' }], trips: [{ endedAt: '101', effectiveMilliMiles: '999' }] }),
+    getTrackingSnapshot: async () => ({ state: 'idle' as const }), startTracking: async () => ({ state: 'tracking' as const }), stopTracking: async () => ({ state: 'idle' as const }),
+  } as NativeMaintenanceStore;
+
+  assert.equal((await createMaintenanceStore(native).product.getVehicles())[0].currentOdometerMilliMiles, '42126000');
 });
 
 test('product-store completes a schedule through the typed record boundary', async () => {
