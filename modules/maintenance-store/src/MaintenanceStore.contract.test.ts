@@ -35,7 +35,7 @@ test('product-store creates a vehicle without exposing storage internals', async
 
   assert.deepEqual(vehicle, { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' });
   assert.deepEqual(calls, [['Daily', 2020, 'Honda', 'Civic', '42125000']]);
-  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createMaintenanceRecord', 'createMaintenanceSchedule', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'deleteMaintenanceSchedule', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getMaintenanceSchedules', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateMaintenanceSchedule', 'updateVehicle']);
+  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'completeMaintenanceSchedule', 'createMaintenanceRecord', 'createMaintenanceSchedule', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'deleteMaintenanceSchedule', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getMaintenanceSchedules', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateMaintenanceSchedule', 'updateVehicle']);
 });
 
 test('product-store exposes first-run state and garage vehicles without exposing persistence details', async () => {
@@ -65,7 +65,7 @@ test('product-store exposes first-run state and garage vehicles without exposing
   assert.deepEqual(await store.product.getVehicles(), [
     { id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic', currentOdometerMilliMiles: '42125000', scheduleCount: 0, trackingReadiness: 'manual_only' },
   ]);
-  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'createMaintenanceRecord', 'createMaintenanceSchedule', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'deleteMaintenanceSchedule', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getMaintenanceSchedules', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateMaintenanceSchedule', 'updateVehicle']);
+  assert.deepEqual(Object.keys(store.product).sort(), ['acceptDisclosure', 'archiveVehicle', 'completeMaintenanceSchedule', 'createMaintenanceRecord', 'createMaintenanceSchedule', 'createVehicle', 'deleteAllData', 'deleteMaintenanceRecord', 'deleteMaintenanceSchedule', 'getArchivedVehicles', 'getBootstrap', 'getMaintenanceRecords', 'getMaintenanceSchedules', 'getRecoveryState', 'getVehicles', 'removeHeroPhoto', 'replaceHeroPhoto', 'restoreVehicle', 'updateMaintenanceRecord', 'updateMaintenanceSchedule', 'updateVehicle']);
 });
 
 test('product-store reports when an installed development client lacks the garage bridge', async () => {
@@ -202,4 +202,18 @@ test('product-store forwards maintenance CRUD with civil dates and integer milea
     ['list', '7'], ['create', '7', 'Oil', '2026-07-25', '42125500', 'Synthetic'],
     ['update', '9', '7', 'Oil', '2026-07-25', '42125500', undefined], ['delete', '9'],
   ]);
+});
+
+test('product-store completes a schedule through the typed record boundary', async () => {
+  const calls: unknown[][] = [];
+  const native = {
+    getBootstrap: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 1 }), getRecoveryState: async () => ({ state: 'ready' as const }), acceptDisclosure: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 1 }), deleteAllData: async () => ({ disclosureAccepted: false, disclosureVersion: 0, schemaVersion: 1 }),
+    createVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }), getVehicles: async () => [], getArchivedVehicles: async () => [], updateVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }), archiveVehicle: async () => {}, restoreVehicle: async () => {},
+    completeMaintenanceSchedule: async (...args: unknown[]) => { calls.push(args); return { id: '9', vehicleId: '7', scheduleId: '3', serviceName: 'Oil', completedOn: '2026-07-25', milliMiles: '42125500' }; },
+    getTrackingSnapshot: async () => ({ state: 'idle' as const }), startTracking: async () => ({ state: 'tracking' as const }), stopTracking: async () => ({ state: 'idle' as const }),
+  } as NativeMaintenanceStore;
+
+  const record = await createMaintenanceStore(native).product.completeMaintenanceSchedule({ scheduleId: '3', completedOn: '2026-07-25', milliMiles: '42125500' });
+  assert.equal(record.scheduleId, '3');
+  assert.deepEqual(calls, [['3', '2026-07-25', '42125500', undefined]]);
 });

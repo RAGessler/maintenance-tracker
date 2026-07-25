@@ -283,6 +283,34 @@ func managesMaintenanceSchedules() throws {
   }
 }
 
+@Test("linked completions become the schedule baseline and safely fall back")
+func recalculatesScheduleBaselineFromLinkedRecords() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 42_000_000, now: 2)
+  let schedule = try store.createMaintenanceSchedule(vehicleId: vehicle.id, serviceName: "Oil", sourceTemplateKey: nil, sourceTemplateVersion: nil, mileageIntervalMilliMiles: 5_000_000, dayInterval: 365, baselineDate: "2026-01-01", baselineMilliMiles: 42_000_000, now: 3)
+  let older = try store.completeMaintenanceSchedule(id: schedule.id, completedOn: "2026-02-01", milliMiles: 42_500_000, note: nil, now: 4)
+  let newer = try store.completeMaintenanceSchedule(id: schedule.id, completedOn: "2026-03-01", milliMiles: 43_000_000, note: nil, now: 5)
+
+  #expect(try store.maintenanceSchedules(for: vehicle.id).first?.baselineDate == "2026-03-01")
+  _ = try store.updateMaintenanceRecord(id: newer.id, vehicleId: vehicle.id, serviceName: "Oil", completedOn: "2026-01-15", milliMiles: 42_400_000, note: nil, now: 6)
+  #expect(try store.maintenanceSchedules(for: vehicle.id).first?.baselineMilliMiles == 42_500_000)
+  try store.deleteMaintenanceRecord(id: older.id)
+  #expect(try store.maintenanceSchedules(for: vehicle.id).first?.baselineDate == "2026-01-15")
+  try store.deleteMaintenanceRecord(id: newer.id)
+  #expect(try store.maintenanceSchedules(for: vehicle.id).first?.baselineMilliMiles == 42_000_000)
+
+  _ = try store.completeMaintenanceSchedule(id: schedule.id, completedOn: "2026-04-01", milliMiles: 43_500_000, note: nil, now: 7)
+  try store.deleteMaintenanceSchedule(id: schedule.id)
+  #expect(try store.maintenanceRecords(for: vehicle.id).first?.scheduleId == nil)
+  store.close()
+  let reopenedStore = try LocalStore(path: databaseURL.path)
+  #expect(try reopenedStore.maintenanceRecords(for: vehicle.id).count == 1)
+}
+
 @Test("the current schema accepts only approved durable trip codes")
 func constrainsPersistedTripCodes() throws {
   let directoryURL = FileManager.default.temporaryDirectory

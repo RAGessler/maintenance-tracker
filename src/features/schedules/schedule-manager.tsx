@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import { Alert, findNodeHandle, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing, TorqueColors } from '@/constants/theme';
@@ -9,7 +9,7 @@ import { scheduleTemplates, type ScheduleTemplate } from './schedule-templates';
 
 type Draft = Readonly<{ serviceName: string; mileage: string; days: string; baselineDate: string; baselineMiles: string; sourceTemplateKey?: string; sourceTemplateVersion?: number }>;
 
-export function ScheduleManager({ vehicleId, currentOdometerMilliMiles }: Readonly<{ vehicleId: string; currentOdometerMilliMiles: string }>) {
+export function ScheduleManager({ vehicleId, currentOdometerMilliMiles, highlightedScheduleId, scrollRef }: Readonly<{ vehicleId: string; currentOdometerMilliMiles: string; highlightedScheduleId?: string; scrollRef?: RefObject<ScrollView | null> }>) {
   const [schedules, setSchedules] = useState<MaintenanceSchedule[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editing, setEditing] = useState<MaintenanceSchedule | null>(null);
@@ -26,8 +26,8 @@ export function ScheduleManager({ vehicleId, currentOdometerMilliMiles }: Readon
     setDraft(schedule ? {
       serviceName: schedule.serviceName,
       mileage: schedule.mileageIntervalMilliMiles ? formatInputMiles(schedule.mileageIntervalMilliMiles) : '',
-      days: schedule.dayInterval?.toString() ?? '', baselineDate: schedule.baselineDate,
-      baselineMiles: formatInputMiles(schedule.baselineMilliMiles), sourceTemplateKey: schedule.sourceTemplateKey, sourceTemplateVersion: schedule.sourceTemplateVersion,
+      days: schedule.dayInterval?.toString() ?? '', baselineDate: schedule.initialBaselineDate,
+      baselineMiles: formatInputMiles(schedule.initialBaselineMilliMiles), sourceTemplateKey: schedule.sourceTemplateKey, sourceTemplateVersion: schedule.sourceTemplateVersion,
     } : {
       serviceName: template?.serviceName ?? '',
       mileage: template?.mileageIntervalMilliMiles ? formatInputMiles(template.mileageIntervalMilliMiles) : '',
@@ -40,7 +40,7 @@ export function ScheduleManager({ vehicleId, currentOdometerMilliMiles }: Readon
     if (!draft || !valid(draft)) return;
     const input = { serviceName: draft.serviceName.trim(), mileageIntervalMilliMiles: draft.mileage ? toMilliMiles(draft.mileage) : undefined, dayInterval: draft.days ? Number(draft.days) : undefined, baselineDate: draft.baselineDate, baselineMilliMiles: toMilliMiles(draft.baselineMiles), sourceTemplateKey: draft.sourceTemplateKey, sourceTemplateVersion: draft.sourceTemplateVersion };
     try {
-      if (editing) await maintenanceStore.product.updateMaintenanceSchedule({ id: editing.id, ...input });
+      if (editing) await maintenanceStore.product.updateMaintenanceSchedule({ id: editing.id, serviceName: input.serviceName, mileageIntervalMilliMiles: input.mileageIntervalMilliMiles, dayInterval: input.dayInterval, initialBaselineDate: input.baselineDate, initialBaselineMilliMiles: input.baselineMilliMiles });
       else await maintenanceStore.product.createMaintenanceSchedule({ vehicleId, ...input });
       setDraft(null); setEditing(null); await load();
     } catch (error: unknown) {
@@ -68,18 +68,25 @@ export function ScheduleManager({ vehicleId, currentOdometerMilliMiles }: Readon
       <ScheduleField label="Baseline odometer (mi)" value={draft.baselineMiles} keyboardType="number-pad" onChangeText={(baselineMiles) => setDraft({ ...draft, baselineMiles })} />
       <View style={styles.actions}><Button label="Cancel" secondary onPress={() => { setDraft(null); setEditing(null); }} /><Button label="Save schedule" disabled={!valid(draft)} onPress={() => void save()} /></View>
     </View> : <>
-      {schedules.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} currentOdometerMilliMiles={currentOdometerMilliMiles} onEdit={() => open(undefined, schedule)} onDelete={() => remove(schedule)} />)}
+      {schedules.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} currentOdometerMilliMiles={currentOdometerMilliMiles} highlighted={schedule.id === highlightedScheduleId} scrollRef={scrollRef} onEdit={() => open(undefined, schedule)} onDelete={() => remove(schedule)} onComplete={() => Alert.alert(`Complete ${schedule.serviceName}?`, `This records today at ${formatMiles(currentOdometerMilliMiles)} mi and resets this schedule's due baseline.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Complete', onPress: () => maintenanceStore.product.completeMaintenanceSchedule({ scheduleId: schedule.id, completedOn: civilToday(), milliMiles: currentOdometerMilliMiles }).then(load).catch(() => setError('The maintenance completion could not be saved. Try again.')) }])} />)}
       <View style={styles.templates}>{scheduleTemplates.map((template) => <Button key={template.key} label={`Add ${template.serviceName}`} secondary onPress={() => open(template)} />)}</View>
       <Button label="Add custom schedule" onPress={() => open()} />
     </>}
   </View>;
 }
 
-function ScheduleRow({ schedule, currentOdometerMilliMiles, onEdit, onDelete }: Readonly<{ schedule: MaintenanceSchedule; currentOdometerMilliMiles: string; onEdit: () => void; onDelete: () => void }>) {
+function ScheduleRow({ schedule, currentOdometerMilliMiles, highlighted, scrollRef, onEdit, onDelete, onComplete }: Readonly<{ schedule: MaintenanceSchedule; currentOdometerMilliMiles: string; highlighted: boolean; scrollRef?: RefObject<ScrollView | null>; onEdit: () => void; onDelete: () => void; onComplete: () => void }>) {
+  const rowRef = useRef<View>(null);
+  useEffect(() => {
+    if (!highlighted || !scrollRef?.current || !rowRef.current) return;
+    const scrollNode = findNodeHandle(scrollRef.current);
+    if (scrollNode === null) return;
+    rowRef.current.measureLayout(scrollNode, (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(y - Spacing.two, 0), animated: true }));
+  }, [highlighted, scrollRef]);
   const due = calculateDue(schedule, currentOdometerMilliMiles, civilToday());
   const mileageCopy = due.mileage && (BigInt(due.mileage.remainingMilliMiles) < 0n ? `${formatMiles((-BigInt(due.mileage.remainingMilliMiles)).toString())} mi overdue` : `${formatMiles(due.mileage.remainingMilliMiles)} mi remaining`);
   const timeCopy = due.time && (due.time.remainingDays < 0 ? `${Math.abs(due.time.remainingDays)} days overdue` : `${due.time.remainingDays} days remaining`);
-  return <View style={styles.row}><Pressable accessibilityRole="button" accessibilityLabel={`${schedule.serviceName}, ${due.state.replace('_', ' ')}`} onPress={onEdit}><ThemedText style={styles.rowTitle}>{schedule.serviceName}</ThemedText><ThemedText style={styles.rowCopy}>{due.state === 'due' ? 'Due now' : due.state === 'due_soon' ? 'Due soon' : 'Current'} · Controlled by {due.controllingCondition === 'both' ? 'both thresholds' : due.controllingCondition}</ThemedText><ThemedText style={styles.rowCopy}>Baseline: {formatMiles(schedule.baselineMilliMiles)} mi on {schedule.baselineDate}</ThemedText>{due.mileage && <ThemedText style={styles.rowCopy}>Mileage: due at {formatMiles(due.mileage.dueAtMilliMiles)} mi · {mileageCopy}</ThemedText>}{due.time && <ThemedText style={styles.rowCopy}>Time: due {due.time.dueOn} · {timeCopy}</ThemedText>}</Pressable><Pressable accessibilityRole="button" accessibilityLabel={`Delete ${schedule.serviceName}`} onPress={onDelete}><ThemedText style={styles.delete}>Delete</ThemedText></Pressable></View>;
+  return <View ref={rowRef} accessibilityLabel={highlighted ? 'Selected maintenance schedule' : undefined} style={[styles.row, highlighted && styles.highlightedRow]}><Pressable accessibilityRole="button" accessibilityLabel={`${schedule.serviceName}, ${due.state.replace('_', ' ')}`} onPress={onEdit}><ThemedText style={styles.rowTitle}>{schedule.serviceName}</ThemedText><ThemedText style={styles.rowCopy}>{due.state === 'due' ? 'Due now' : due.state === 'due_soon' ? 'Due soon' : 'Current'} · Controlled by {due.controllingCondition === 'both' ? 'both thresholds' : due.controllingCondition}</ThemedText><ThemedText style={styles.rowCopy}>Baseline: {formatMiles(schedule.baselineMilliMiles)} mi on {schedule.baselineDate}</ThemedText>{due.mileage && <ThemedText style={styles.rowCopy}>Mileage: due at {formatMiles(due.mileage.dueAtMilliMiles)} mi · {mileageCopy}</ThemedText>}{due.time && <ThemedText style={styles.rowCopy}>Time: due {due.time.dueOn} · {timeCopy}</ThemedText>}</Pressable><View style={styles.rowActions}><Pressable accessibilityRole="button" accessibilityLabel={`Complete ${schedule.serviceName}`} onPress={onComplete}><ThemedText type="linkPrimary">Complete</ThemedText></Pressable><Pressable accessibilityRole="button" accessibilityLabel={`Delete ${schedule.serviceName}`} onPress={onDelete}><ThemedText style={styles.delete}>Delete</ThemedText></Pressable></View></View>;
 }
 
 function ScheduleField({ label, ...props }: Readonly<{ label: string } & React.ComponentProps<typeof TextInput>>) { return <View style={styles.field}><ThemedText style={styles.label}>{label}</ThemedText><TextInput {...props} accessibilityLabel={label} style={styles.input} /></View>; }
@@ -92,5 +99,5 @@ function validMiles(value: string) { return /^\d+(\.\d{1,3})?$/.test(value); }
 function toMilliMiles(value: string) { const [miles, fraction = ''] = value.split('.'); return (BigInt(miles) * 1_000n + BigInt(fraction.padEnd(3, '0'))).toString(); }
 
 const styles = StyleSheet.create({
-  section: { gap: Spacing.two }, title: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, copy: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 }, error: { color: TorqueColors.error }, row: { backgroundColor: TorqueColors.card, borderRadius: 12, padding: Spacing.three, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two }, rowTitle: { color: TorqueColors.text, fontSize: 16, fontWeight: '600' }, rowCopy: { color: TorqueColors.secondary, fontSize: 13, marginTop: 3 }, delete: { color: TorqueColors.error, fontSize: 15 }, templates: { gap: Spacing.one }, form: { gap: Spacing.two, backgroundColor: TorqueColors.card, borderRadius: 12, padding: Spacing.three }, formTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700' }, field: { gap: Spacing.half }, label: { color: TorqueColors.text, fontSize: 13, fontWeight: '600' }, input: { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: TorqueColors.divider, color: TorqueColors.text, minHeight: 36, fontSize: 16 }, actions: { flexDirection: 'row', gap: Spacing.two }, button: { minHeight: 44, borderRadius: 10, backgroundColor: TorqueColors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.two, flex: 1 }, buttonText: { color: '#FFFFFF', fontWeight: '700', textAlign: 'center' }, secondary: { backgroundColor: '#E5F1FF' }, secondaryText: { color: TorqueColors.primary }, disabled: { opacity: 0.45 },
+  section: { gap: Spacing.two }, title: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, copy: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 }, error: { color: TorqueColors.error }, row: { backgroundColor: TorqueColors.card, borderRadius: 12, padding: Spacing.three, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two }, highlightedRow: { borderColor: TorqueColors.primary, borderWidth: 2 }, rowActions: { gap: Spacing.two, alignItems: 'flex-end' }, rowTitle: { color: TorqueColors.text, fontSize: 16, fontWeight: '600' }, rowCopy: { color: TorqueColors.secondary, fontSize: 13, marginTop: 3 }, delete: { color: TorqueColors.error, fontSize: 15 }, templates: { gap: Spacing.one }, form: { gap: Spacing.two, backgroundColor: TorqueColors.card, borderRadius: 12, padding: Spacing.three }, formTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700' }, field: { gap: Spacing.half }, label: { color: TorqueColors.text, fontSize: 13, fontWeight: '600' }, input: { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: TorqueColors.divider, color: TorqueColors.text, minHeight: 36, fontSize: 16 }, actions: { flexDirection: 'row', gap: Spacing.two }, button: { minHeight: 44, borderRadius: 10, backgroundColor: TorqueColors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.two, flex: 1 }, buttonText: { color: '#FFFFFF', fontWeight: '700', textAlign: 'center' }, secondary: { backgroundColor: '#E5F1FF' }, secondaryText: { color: TorqueColors.primary }, disabled: { opacity: 0.45 },
 });

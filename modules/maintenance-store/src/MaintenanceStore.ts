@@ -47,14 +47,23 @@ export type MaintenanceSchedule = Readonly<{
   dayInterval?: number;
   baselineDate: string;
   baselineMilliMiles: string;
+  initialBaselineDate: string;
+  initialBaselineMilliMiles: string;
 }>;
 
-export type CreateMaintenanceScheduleInput = Omit<MaintenanceSchedule, 'id'>;
-export type UpdateMaintenanceScheduleInput = Pick<MaintenanceSchedule, 'id' | 'serviceName' | 'mileageIntervalMilliMiles' | 'dayInterval' | 'baselineDate' | 'baselineMilliMiles'>;
+export type CreateMaintenanceScheduleInput = Omit<MaintenanceSchedule, 'id' | 'initialBaselineDate' | 'initialBaselineMilliMiles'>;
+export type UpdateMaintenanceScheduleInput = Pick<MaintenanceSchedule, 'id' | 'serviceName' | 'mileageIntervalMilliMiles' | 'dayInterval' | 'initialBaselineDate' | 'initialBaselineMilliMiles'>;
 
 export type CreateMaintenanceRecordInput = Readonly<{
   vehicleId: string;
   serviceName: string;
+  completedOn: string;
+  milliMiles: string;
+  note?: string;
+}>;
+
+export type CompleteMaintenanceScheduleInput = Readonly<{
+  scheduleId: string;
   completedOn: string;
   milliMiles: string;
   note?: string;
@@ -116,6 +125,7 @@ export interface NativeMaintenanceStore {
   createMaintenanceSchedule?(vehicleId: string, serviceName: string, sourceTemplateKey: string | undefined, sourceTemplateVersion: number | undefined, mileageIntervalMilliMiles: string | undefined, dayInterval: number | undefined, baselineDate: string, baselineMilliMiles: string): Promise<MaintenanceSchedule>;
   updateMaintenanceSchedule?(id: string, serviceName: string, mileageIntervalMilliMiles: string | undefined, dayInterval: number | undefined, baselineDate: string, baselineMilliMiles: string): Promise<MaintenanceSchedule>;
   deleteMaintenanceSchedule?(id: string): Promise<void>;
+  completeMaintenanceSchedule?(scheduleId: string, completedOn: string, milliMiles: string, note?: string): Promise<MaintenanceRecord>;
 }
 
 export type MaintenanceStore = Readonly<{
@@ -134,6 +144,7 @@ export type MaintenanceStore = Readonly<{
     removeHeroPhoto(vehicleId: string): Promise<void>;
     getMaintenanceRecords(vehicleId: string): Promise<MaintenanceRecord[]>;
     createMaintenanceRecord(input: CreateMaintenanceRecordInput): Promise<MaintenanceRecord>;
+    completeMaintenanceSchedule(input: CompleteMaintenanceScheduleInput): Promise<MaintenanceRecord>;
     updateMaintenanceRecord(input: UpdateMaintenanceRecordInput): Promise<MaintenanceRecord>;
     deleteMaintenanceRecord(recordId: string): Promise<void>;
     getMaintenanceSchedules(vehicleId: string): Promise<MaintenanceSchedule[]>;
@@ -198,6 +209,10 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
         if (typeof native.createMaintenanceRecord !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage maintenance history.'));
         return native.createMaintenanceRecord(input.vehicleId, input.serviceName, input.completedOn, input.milliMiles, input.note);
       },
+      completeMaintenanceSchedule: (input) => {
+        if (typeof native.completeMaintenanceSchedule !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to complete maintenance schedules.'));
+        return native.completeMaintenanceSchedule(input.scheduleId, input.completedOn, input.milliMiles, input.note);
+      },
       updateMaintenanceRecord: (input) => {
         if (typeof native.updateMaintenanceRecord !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage maintenance history.'));
         return native.updateMaintenanceRecord(input.id, input.vehicleId, input.serviceName, input.completedOn, input.milliMiles, input.note);
@@ -216,7 +231,7 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
       },
       updateMaintenanceSchedule: (input) => {
         if (typeof native.updateMaintenanceSchedule !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage maintenance schedules.'));
-        return native.updateMaintenanceSchedule(input.id, input.serviceName, input.mileageIntervalMilliMiles, input.dayInterval, input.baselineDate, input.baselineMilliMiles);
+        return native.updateMaintenanceSchedule(input.id, input.serviceName, input.mileageIntervalMilliMiles, input.dayInterval, input.initialBaselineDate, input.initialBaselineMilliMiles);
       },
       deleteMaintenanceSchedule: (scheduleId) => {
         if (typeof native.deleteMaintenanceSchedule !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage maintenance schedules.'));

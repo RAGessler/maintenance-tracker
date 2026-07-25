@@ -164,6 +164,15 @@ public class MaintenanceStoreModule: Module {
       try self.localStore().deleteMaintenanceSchedule(id: nativeScheduleId)
     }
 
+    AsyncFunction("completeMaintenanceSchedule") { (scheduleId: String, completedOn: String, milliMiles: String, note: String?) throws -> [String: Any] in
+      guard let nativeScheduleId = Int64(scheduleId), let nativeMilliMiles = Int64(milliMiles), nativeMilliMiles >= 0 else {
+        throw LocalStoreError.invalidMaintenanceRecord
+      }
+      return try Self.maintenanceRecordDictionary(self.localStore().completeMaintenanceSchedule(
+        id: nativeScheduleId, completedOn: completedOn, milliMiles: nativeMilliMiles, note: note, now: Self.now()
+      ))
+    }
+
     AsyncFunction("getTrackingSnapshot") { () throws -> [String: String] in
       ["state": try self.localStore().trackingState()]
     }
@@ -304,6 +313,7 @@ public class MaintenanceStoreModule: Module {
     var result: [String: Any] = [
       "id": String(schedule.id), "vehicleId": String(schedule.vehicleId), "serviceName": schedule.serviceName,
       "baselineDate": schedule.baselineDate, "baselineMilliMiles": String(schedule.baselineMilliMiles),
+      "initialBaselineDate": schedule.initialBaselineDate, "initialBaselineMilliMiles": String(schedule.initialBaselineMilliMiles),
     ]
     if let key = schedule.sourceTemplateKey { result["sourceTemplateKey"] = key }
     if let version = schedule.sourceTemplateVersion { result["sourceTemplateVersion"] = version }
