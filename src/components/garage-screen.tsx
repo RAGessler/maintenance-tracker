@@ -1,5 +1,5 @@
-import { useEffect, useEffectEvent, useState } from 'react';
-import { Link, type Href, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useEffectEvent, useState } from 'react';
+import { Link, type Href, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { ActionSheetIOS, Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
@@ -22,20 +22,13 @@ export function GarageScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const loadVehicles = () => {
+  const loadVehicles = useCallback(() => {
     setLoading(true);
     setLoadError(null);
     loadGarageVehicles().then(([active, archived]) => { setVehicles(active); setArchivedVehicles(archived); }).catch((error: unknown) => setLoadError(error instanceof Error ? error.message : 'Vehicles could not be loaded.')).finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    let active = true;
-    loadGarageVehicles()
-      .then(([loadedVehicles, loadedArchivedVehicles]) => { if (active) { setVehicles(loadedVehicles); setArchivedVehicles(loadedArchivedVehicles); } })
-      .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : 'Vehicles could not be loaded.'); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
   }, []);
+
+  useFocusEffect(loadVehicles);
 
   if (adding) {
     return <VehicleForm onCancel={() => setAdding(false)} onCreated={(vehicle) => { setVehicles((current) => [...current, vehicle]); setAdding(false); }} />;
