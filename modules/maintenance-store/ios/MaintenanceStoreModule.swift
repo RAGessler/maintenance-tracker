@@ -96,14 +96,19 @@ public class MaintenanceStoreModule: Module {
   private func localStore() throws -> LocalStore {
     if let store { return store }
     if let openingError { throw openingError }
-    let directory = try storeDirectory()
     do {
+      let directory = try storeDirectory()
       let store = try LocalStore(path: directory.appendingPathComponent("product.sqlite").path)
+      try store.reconcilePhotoFiles(in: directory.appendingPathComponent("photos", isDirectory: true))
       self.store = store
       return store
     } catch let error as LocalStoreError {
       openingError = error
       throw error
+    } catch {
+      let openingError = LocalStoreError.sqlite("Unable to prepare the local store")
+      self.openingError = openingError
+      throw openingError
     }
   }
 

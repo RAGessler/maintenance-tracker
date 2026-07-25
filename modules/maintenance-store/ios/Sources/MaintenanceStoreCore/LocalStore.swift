@@ -132,18 +132,8 @@ public final class LocalStore: @unchecked Sendable {
 
   public func vehicles() throws -> [StoredGarageVehicle] {
     guard let database else { throw LocalStoreError.sqlite("Store is closed") }
-    let sql = """
-      SELECT vehicle.id, vehicle.nickname, vehicle.year, vehicle.make, vehicle.model, manual_odometer_reading.milli_miles
-      FROM vehicle
-      JOIN manual_odometer_reading ON manual_odometer_reading.id = (
-        SELECT id FROM manual_odometer_reading
-        WHERE vehicle_id = vehicle.id ORDER BY effective_at DESC, id DESC LIMIT 1
-      )
-      WHERE vehicle.archived_at IS NULL
-      ORDER BY vehicle.nickname COLLATE NOCASE, vehicle.id
-      """
     var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+    guard sqlite3_prepare_v2(database, garageVehiclesQuery, -1, &statement, nil) == SQLITE_OK, let statement else {
       throw failure(database)
     }
     defer { sqlite3_finalize(statement) }
@@ -450,6 +440,17 @@ public final class LocalStore: @unchecked Sendable {
     LocalStoreError.sqlite(String(cString: sqlite3_errmsg(database)))
   }
 }
+
+let garageVehiclesQuery = """
+  SELECT vehicle.id, vehicle.nickname, vehicle.year, vehicle.make, vehicle.model, manual_odometer_reading.milli_miles
+  FROM vehicle
+  JOIN manual_odometer_reading ON manual_odometer_reading.id = (
+    SELECT id FROM manual_odometer_reading
+    WHERE vehicle_id = vehicle.id ORDER BY effective_at DESC, id DESC LIMIT 1
+  )
+  WHERE vehicle.archived_at IS NULL
+  ORDER BY vehicle.nickname COLLATE NOCASE, vehicle.id
+  """
 
 private let schemaV1 = """
 CREATE TABLE installation_state (

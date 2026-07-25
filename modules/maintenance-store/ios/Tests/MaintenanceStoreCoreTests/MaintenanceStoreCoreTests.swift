@@ -285,8 +285,9 @@ func usesApprovedReadIndexes() throws {
   let database = try openDatabase(at: databaseURL)
   defer { sqlite3_close(database) }
 
-  #expect(try queryPlan(database, "SELECT id FROM vehicle WHERE archived_at IS NULL ORDER BY nickname COLLATE NOCASE").contains("vehicle_active_nickname"))
-  #expect(try queryPlan(database, "SELECT milli_miles FROM manual_odometer_reading WHERE vehicle_id = 1 ORDER BY effective_at DESC, id DESC LIMIT 1").contains("odometer_latest"))
+  let garagePlan = try queryPlan(database, garageVehiclesQuery)
+  #expect(garagePlan.contains("vehicle_active_nickname"))
+  #expect(garagePlan.contains("odometer_latest"))
 }
 
 private func insertTrip(
