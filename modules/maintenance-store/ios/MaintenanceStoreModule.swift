@@ -51,7 +51,7 @@ public class MaintenanceStoreModule: Module {
 
   private func localStore() throws -> LocalStore {
     if let store { return store }
-    let directory = try FileManager.default.url(
+    var directory = try FileManager.default.url(
       for: .applicationSupportDirectory,
       in: .userDomainMask,
       appropriateFor: nil,
