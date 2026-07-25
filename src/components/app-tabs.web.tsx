@@ -27,6 +27,11 @@ export default function AppTabs() {
           <TabTrigger name="explore" href="/explore" asChild>
             <TabButton>Explore</TabButton>
           </TabTrigger>
+          <TabTrigger
+            name="mvp-flows-prototype"
+            href="/mvp-flows-prototype"
+            style={styles.prototypeTab}
+          />
         </CustomTabList>
       </TabList>
     </Tabs>
@@ -111,5 +116,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.one,
     marginLeft: Spacing.three,
+  },
+  prototypeTab: {
+    display: 'none',
   },
 });
