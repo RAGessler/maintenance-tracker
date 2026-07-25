@@ -1,12 +1,12 @@
 # Maintenance Tracker
 
-Clean Expo development-build baseline for isolated vehicle trip-trigger spikes.
+Expo SDK 57 development-build foundation for the private iOS Maintenance Tracker beta.
 
 ## Planning and project truth
 
 GitHub is the project system of record:
 
-- [MVP parent and feature hierarchy](https://github.com/RAGessler/maintenance-tracker/issues/5)
+- [MVP parent and feature hierarchy](https://github.com/RAGessler/maintenance-tracker/issues/69)
 - [Maintenance Tracker — MVP Project](https://github.com/users/RAGessler/projects/8)
 - [Current architecture and approved boundaries](docs/architecture.md)
 - [Architecture decision records](docs/adr/)
@@ -65,22 +65,17 @@ npm run start:go
 Expo Go is not a valid test environment for the Bluetooth, App Intents, broadcast receiver,
 background execution, or background location behavior covered by the active spikes.
 
-## Spike workflow
+## MVP workflow
 
 Keep the repository root as the application under test. Do not nest additional Expo projects.
 
-1. Branch from the clean baseline.
-2. Implement one platform spike on that branch.
-3. Record evidence, limitations, and an **adopt**, **adapt**, or **reject** disposition in its
-   GitHub issue.
-4. Merge reusable platform-neutral infrastructure only after the spike proves it is useful.
+1. Start with an unblocked implementation issue in the [MVP hierarchy](https://github.com/RAGessler/maintenance-tracker/issues/69).
+2. Use one branch per issue and preserve unrelated working-tree changes.
+3. Implement and verify the issue's acceptance criteria, including native and physical-device evidence where required.
+4. Record the verification evidence on the issue and close it only when its definition of done is met.
 
-The full spike closeout requirements are defined in [AGENTS.md](AGENTS.md#spike-completion).
-
-Active work:
-
-- [iOS car-stereo trip triggers](https://github.com/RAGessler/maintenance-tracker/issues/2)
-- [Android car-stereo Bluetooth trip triggers](https://github.com/RAGessler/maintenance-tracker/issues/3)
+Spike closeout requirements remain defined in [AGENTS.md](AGENTS.md#spike-completion). Completed
+spikes and decisions constrain the MVP; they are not the active implementation workflow.
 
 ## Useful commands
 

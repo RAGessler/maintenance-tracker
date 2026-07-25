@@ -15,17 +15,18 @@ creates an auditable reconciliation; it must not silently rewrite historical tri
 
 ## Current implementation
 
-The repository is an Expo SDK 57 development-build baseline with:
+The repository has an Expo SDK 57 development-build foundation with:
 
 - React Native 0.86 and strict TypeScript;
 - Expo Router;
 - Continuous Native Generation;
 - `expo-dev-client` for native integrations;
-- generated, uncommitted iOS and Android projects.
+- generated, uncommitted iOS and Android projects;
+- a schema-version-1 native-owned SQLite store and local Expo module for the private iOS beta.
 
-The active implementation work is platform feasibility testing for vehicle trip triggers. The
-production account, garage, records, schedules, and tracking systems described by the MVP plan are
-not implemented yet.
+The native store is the first MVP implementation slice. The garage, records, schedules, complete
+tracking lifecycle, privacy controls, export, and release systems remain in their respective MVP
+implementation issues.
 
 ## Approved tracking boundaries
 
@@ -43,19 +44,25 @@ not implemented yet.
 - Production tracking behavior must not exceed the contract proven by the platform spikes and
   approved by the cross-platform tracking decision.
 
-## Planned production shape
+## Approved private-beta shape
 
-The MVP plan proposes:
+The private iOS TestFlight beta is planned around:
 
-- Supabase Postgres, Auth, and private Storage;
-- Row Level Security for every user-owned table and private storage policy;
+- device-local data with no account, backend, synchronization, or recovery promise;
+- one versioned, native-owned SQLite store for canonical records, tracking state, and diagnostics;
+- app-owned, metadata-stripped vehicle photos stored as private files;
 - four primary tabs: Garage, Activity, Due, and Settings;
-- a shared trip state machine with platform-specific trigger adapters;
+- a native iOS trip state machine that can run without React Native, with adapters for App Intents,
+  Core Location, audio-route evidence, clocks, and deadlines;
+- typed product-store and trip-tracking interfaces exposed to React Native by one local Expo module;
 - reviewed trips feeding an estimated odometer;
 - a deterministic schedule engine using mileage, time, or whichever comes first;
-- no indefinite retention or user-facing playback of raw GPS traces.
+- no indefinite retention, export, or user-facing playback of raw GPS traces;
+- a versioned portable user export and complete local deletion.
 
 These are planning constraints, not a claim that the corresponding systems already exist.
+The durable persistence and tracking boundaries are recorded in
+[`ADR-0001`](adr/0001-native-owned-local-persistence-and-tracking.md).
 
 ## Decision and evidence flow
 
