@@ -182,7 +182,6 @@ public final class LocalStore: @unchecked Sendable {
   }
 
   private func configure(_ connection: OpaquePointer) throws {
-    try execute("PRAGMA busy_timeout = 5000")
     try execute("PRAGMA foreign_keys = ON")
     try execute("PRAGMA journal_mode = WAL")
     try execute("PRAGMA synchronous = FULL")
@@ -191,6 +190,13 @@ public final class LocalStore: @unchecked Sendable {
   private func migrate(_ connection: OpaquePointer) throws {
     Self.writeLock.lock()
     defer { Self.writeLock.unlock() }
+    guard sqlite3_busy_timeout(connection, 5000) == SQLITE_OK else {
+      throw LocalStoreError.sqlite("Could not configure SQLite busy timeout")
+    }
+    let initialVersion = Int(try scalarInt64("PRAGMA user_version", []))
+    guard initialVersion <= Self.currentSchemaVersion else {
+      throw LocalStoreError.unsupportedSchema(initialVersion)
+    }
     try configure(connection)
     try transactionLocked {
       let version = Int(try scalarInt64("PRAGMA user_version", []))
