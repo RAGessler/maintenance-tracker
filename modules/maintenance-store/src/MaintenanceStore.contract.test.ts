@@ -116,7 +116,7 @@ test('trip-tracking forwards only typed foundation commands', async () => {
   assert.deepEqual(await store.tracking.start('7', 'automatic'), { state: 'tracking' });
   assert.deepEqual(await store.tracking.stop(), { state: 'idle' });
   assert.deepEqual(calls, [['7', 'automatic'], []]);
-  assert.deepEqual(Object.keys(store.tracking).sort(), ['getSnapshot', 'getTrips', 'review', 'start', 'stop']);
+  assert.deepEqual(Object.keys(store.tracking).sort(), ['getRevisions', 'getSnapshot', 'getTrips', 'review', 'start', 'stop']);
 });
 
 test('trip-tracking exposes reviewed manual trips without persistence internals', async () => {
@@ -143,6 +143,27 @@ test('trip-tracking exposes reviewed manual trips without persistence internals'
   assert.deepEqual(calls, [
     ['list', '7'], ['review', '9', 'confirm', undefined, undefined],
   ]);
+});
+
+test('trip-tracking exposes an ordered audit trail without storage internals', async () => {
+  const calls: unknown[][] = [];
+  const native = {
+    getBootstrap: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 2 }),
+    getRecoveryState: async () => ({ state: 'ready' as const }),
+    acceptDisclosure: async () => ({ disclosureAccepted: true, disclosureVersion: 1, schemaVersion: 2 }),
+    deleteAllData: async () => ({ disclosureAccepted: false, disclosureVersion: 0, schemaVersion: 2 }),
+    createVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    getVehicles: async () => [], getArchivedVehicles: async () => [],
+    updateVehicle: async () => ({ id: '7', nickname: 'Daily', year: 2020, make: 'Honda', model: 'Civic' }),
+    archiveVehicle: async () => {}, restoreVehicle: async () => {},
+    getTrackingSnapshot: async () => ({ state: 'idle' as const }), startTracking: async () => ({ state: 'tracking' as const }), stopTracking: async () => ({ state: 'idle' as const }),
+    getTripRevisions: async (...args: unknown[]) => { calls.push(args); return [{ revisionNumber: 1, occurredAt: '4', actor: 'system', action: 'finalized', vehicleId: '7', disposition: 'review_required' }]; },
+  } as unknown as NativeMaintenanceStore;
+
+  const revisions = await createMaintenanceStore(native).tracking.getRevisions('9');
+
+  assert.deepEqual(calls, [['9']]);
+  assert.deepEqual(revisions, [{ revisionNumber: 1, occurredAt: '4', actor: 'system', action: 'finalized', vehicleId: '7', disposition: 'review_required' }]);
 });
 
 test('product-store exposes recovery and reset without exposing the failed store', async () => {

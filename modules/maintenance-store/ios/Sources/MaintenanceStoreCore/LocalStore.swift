@@ -54,6 +54,16 @@ public struct StoredTrip: Sendable, Equatable {
   public let failureReason: String?
 }
 
+public struct StoredTripRevision: Sendable, Equatable {
+  public let revisionNumber: Int
+  public let occurredAt: Int64
+  public let actor: String
+  public let action: String
+  public let vehicleId: Int64?
+  public let effectiveMilliMiles: Int64?
+  public let disposition: String
+}
+
 public struct StoredMaintenanceRecord: Sendable, Equatable {
   public let id: Int64
   public let vehicleId: Int64
@@ -501,6 +511,21 @@ public final class LocalStore: @unchecked Sendable {
 
   public func trips(for vehicleId: Int64) throws -> [StoredTrip] {
     try storedTrips("WHERE trip_state.vehicle_id = ?", [.integer(vehicleId)])
+  }
+
+  public func tripRevisions(for tripId: Int64) throws -> [StoredTripRevision] {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    let sql = "SELECT revision_number, occurred_at, actor, action, vehicle_id, effective_milli_miles, disposition FROM trip_revision WHERE trip_id = ? ORDER BY revision_number"
+    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw failure(database) }
+    defer { sqlite3_finalize(statement) }
+    try bind([.integer(tripId)], to: statement)
+    var revisions: [StoredTripRevision] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      guard let actor = sqlite3_column_text(statement, 2), let action = sqlite3_column_text(statement, 3), let disposition = sqlite3_column_text(statement, 6) else { throw LocalStoreError.sqlite("Trip revision was missing required text") }
+      revisions.append(StoredTripRevision(revisionNumber: Int(sqlite3_column_int64(statement, 0)), occurredAt: sqlite3_column_int64(statement, 1), actor: String(cString: actor), action: String(cString: action), vehicleId: sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 4), effectiveMilliMiles: sqlite3_column_type(statement, 5) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 5), disposition: String(cString: disposition)))
+    }
+    return revisions
   }
 
   public func reviewTrip(id: Int64, action: String, effectiveMilliMiles: Int64?, vehicleId: Int64?, now: Int64) throws -> StoredTrip {

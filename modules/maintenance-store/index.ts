@@ -3,4 +3,4 @@
 export { default } from './src/MaintenanceStoreModule';
 export { maintenanceStore } from './src/MaintenanceStoreModule';
 export * from './src/MaintenanceStore.types';
-export type { AppendManualOdometerReadingInput, Bootstrap, CompleteMaintenanceScheduleInput, CreateMaintenanceRecordInput, CreateMaintenanceScheduleInput, CreateVehicleInput, GarageVehicle, MaintenanceRecord, MaintenanceSchedule, MaintenanceStore, ManualOdometerReading, OdometerFacts, RecoveryState, ReviewTripInput, TrackingSnapshot, Trip, UpdateMaintenanceRecordInput, UpdateMaintenanceScheduleInput, UpdateVehicleInput, Vehicle } from './src/MaintenanceStore';
+export type { AppendManualOdometerReadingInput, Bootstrap, CompleteMaintenanceScheduleInput, CreateMaintenanceRecordInput, CreateMaintenanceScheduleInput, CreateVehicleInput, GarageVehicle, MaintenanceRecord, MaintenanceSchedule, MaintenanceStore, ManualOdometerReading, OdometerFacts, RecoveryState, ReviewTripInput, TrackingSnapshot, Trip, TripRevision, UpdateMaintenanceRecordInput, UpdateMaintenanceScheduleInput, UpdateVehicleInput, Vehicle } from './src/MaintenanceStore';

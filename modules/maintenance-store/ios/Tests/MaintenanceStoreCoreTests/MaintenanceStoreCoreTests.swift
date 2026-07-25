@@ -160,6 +160,8 @@ func reviewsManualTripWithoutRetainingTrackingAnchors() throws {
   #expect(rejected.effectiveMilliMiles == nil)
   #expect(try store.confirmedTripDistances(for: second.id).isEmpty)
 
+  #expect(try store.tripRevisions(for: candidate.id).map(\.action) == ["finalized", "corrected", "reassigned", "rejected"])
+
   let database = try openDatabase(at: databaseURL)
   defer { sqlite3_close(database) }
   #expect(try scalar(database, "SELECT COUNT(*) FROM trip_revision WHERE trip_id = \(candidate.id)") == 4)

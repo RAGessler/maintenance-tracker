@@ -221,6 +221,11 @@ public class MaintenanceStoreModule: Module {
       return try self.localStore().trips(for: nativeVehicleId).map(Self.tripDictionary)
     }
 
+    AsyncFunction("getTripRevisions") { (tripId: String) throws -> [[String: Any]] in
+      guard let nativeTripId = Int64(tripId) else { throw LocalStoreError.invalidTrip }
+      return try self.localStore().tripRevisions(for: nativeTripId).map(Self.tripRevisionDictionary)
+    }
+
     AsyncFunction("reviewTrip") { (tripId: String, action: String, effectiveMilliMiles: String?, vehicleId: String?) throws -> [String: Any] in
       guard let nativeTripId = Int64(tripId) else { throw LocalStoreError.invalidTrip }
       let nativeMileage = try Self.optionalMilliMiles(effectiveMilliMiles)
@@ -365,6 +370,16 @@ public class MaintenanceStoreModule: Module {
     if let capturedMilliMiles = trip.capturedMilliMiles { result["capturedMilliMiles"] = String(capturedMilliMiles) }
     if let effectiveMilliMiles = trip.effectiveMilliMiles { result["effectiveMilliMiles"] = String(effectiveMilliMiles) }
     if let failureReason = trip.failureReason { result["failureReason"] = failureReason }
+    return result
+  }
+
+  private static func tripRevisionDictionary(_ revision: StoredTripRevision) -> [String: Any] {
+    var result: [String: Any] = [
+      "revisionNumber": revision.revisionNumber, "occurredAt": String(revision.occurredAt), "actor": revision.actor,
+      "action": revision.action, "disposition": revision.disposition,
+    ]
+    if let vehicleId = revision.vehicleId { result["vehicleId"] = String(vehicleId) }
+    if let effectiveMilliMiles = revision.effectiveMilliMiles { result["effectiveMilliMiles"] = String(effectiveMilliMiles) }
     return result
   }
 
