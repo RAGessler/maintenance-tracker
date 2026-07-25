@@ -206,7 +206,7 @@ public class MaintenanceStoreModule: Module {
       Task { @MainActor in
         MaintenanceTrackingRuntime.shared.resume(now: Self.now())
       }
-      ["state": try self.localStore().trackingState()]
+      return ["state": try self.localStore().trackingState()]
     }
 
     AsyncFunction("getTrackingSetup") { (vehicleId: String) throws -> [String: Any] in

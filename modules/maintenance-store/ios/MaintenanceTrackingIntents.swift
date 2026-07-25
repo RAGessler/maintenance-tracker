@@ -66,7 +66,7 @@ enum TrackingIntentStore {
   }
 
   static func storeDirectory() throws -> URL {
-    let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    var directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
       .appendingPathComponent("MaintenanceTracker", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
     var resourceValues = URLResourceValues(); resourceValues.isExcludedFromBackup = true

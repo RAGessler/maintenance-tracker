@@ -3,7 +3,7 @@ import CoreLocation
 import Foundation
 
 @MainActor
-final class MaintenanceTrackingRuntime: NSObject, CLLocationManagerDelegate {
+final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationManagerDelegate {
   static let shared = MaintenanceTrackingRuntime()
 
   private let locationManager = CLLocationManager()
