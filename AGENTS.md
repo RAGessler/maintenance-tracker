@@ -45,8 +45,9 @@ configuration through Expo configuration and config plugins where practical.
 The TorqueLog iOS beta-flow artifact is the visual and interaction reference for MVP product UI:
 [`docs/design/TorqueLog iOS Beta Flows (standalone).html`](docs/design/TorqueLog%20iOS%20Beta%20Flows%20(standalone).html).
 Read the relevant flow screens before changing a user-facing iOS screen. Preserve their hierarchy,
-copy, states, navigation, accessibility annotations, and interaction intent unless the owning issue
-explicitly approves a deviation.
+copy, states, navigation, non-VoiceOver accessibility annotations, and interaction intent unless the
+owning issue explicitly approves a deviation. VoiceOver annotations in the artifact are outside MVP
+scope and must not be treated as implementation or verification requirements.
 
 Prioritize native iOS design over generic cross-platform layouts. Use the platform's system
 typography, SF Symbols, grouped surfaces, sheets, toolbar conventions, bottom-tab behavior, and

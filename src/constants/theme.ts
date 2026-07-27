@@ -5,7 +5,7 @@
 
 import '@/global.css';
 
-import { Platform } from 'react-native';
+import { DynamicColorIOS, Platform } from 'react-native';
 
 export const Colors = {
   light: {
@@ -61,14 +61,36 @@ export const Spacing = {
   six: 64,
 } as const;
 
+function semanticColor(light: string, dark: string) {
+  return Platform.OS === 'ios' ? DynamicColorIOS({ light, dark }) : light;
+}
+
 export const TorqueColors = {
-  canvas: '#F2F2F7',
-  card: '#FFFFFF',
-  primary: '#007AFF',
-  secondary: '#8E8E93',
-  divider: 'rgba(60, 60, 67, 0.12)',
-  text: '#1C1C1E',
-  error: '#FF3B30',
+  canvas: semanticColor('#F2F2F7', '#000000'),
+  card: semanticColor('#FFFFFF', '#1C1C1E'),
+  primary: semanticColor('#007AFF', '#0A84FF'),
+  primarySurface: semanticColor('rgba(0, 122, 255, 0.12)', 'rgba(10, 132, 255, 0.22)'),
+  secondary: semanticColor('#8E8E93', '#98989D'),
+  divider: semanticColor('rgba(60, 60, 67, 0.12)', 'rgba(84, 84, 88, 0.65)'),
+  text: semanticColor('#1C1C1E', '#FFFFFF'),
+  error: semanticColor('#FF3B30', '#FF453A'),
+  accentSurface: semanticColor('#E5F1FF', '#102A43'),
+  secondarySurface: semanticColor('#F2F2F7', '#2C2C2E'),
+  // Severity + accent palette from the TorqueLog Alpha design.
+  danger: semanticColor('#D70015', '#FF453A'),
+  dangerSurface: semanticColor('rgba(255, 59, 48, 0.12)', 'rgba(255, 69, 58, 0.22)'),
+  dangerDot: semanticColor('#FF3B30', '#FF453A'),
+  warning: semanticColor('#C93400', '#FF9F0A'),
+  warningSurface: semanticColor('rgba(255, 149, 0, 0.14)', 'rgba(255, 159, 10, 0.22)'),
+  warningDot: semanticColor('#FF9500', '#FF9F0A'),
+  success: semanticColor('#248A3D', '#30D158'),
+  successSurface: semanticColor('rgba(52, 199, 89, 0.12)', 'rgba(48, 209, 88, 0.20)'),
+  successDot: semanticColor('#34C759', '#30D158'),
+  trip: semanticColor('#5856D6', '#5E5CE6'),
+  tripSurface: semanticColor('rgba(88, 86, 214, 0.12)', 'rgba(94, 92, 230, 0.24)'),
+  neutralSurface: semanticColor('rgba(120, 120, 128, 0.14)', 'rgba(120, 120, 128, 0.28)'),
+  neutralDot: semanticColor('#C7C7CC', '#48484A'),
+  track: semanticColor('rgba(120, 120, 128, 0.16)', 'rgba(120, 120, 128, 0.32)'),
 } as const;
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;

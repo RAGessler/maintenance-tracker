@@ -1,66 +1,223 @@
 import { useCallback, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { QuickAddFab } from '@/components/quick-add';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Card, Chevron, ProgressBar, SeverityDot, toneOf } from '@/components/torque-ui';
 import { Spacing, TorqueColors } from '@/constants/theme';
-import { buildDueList, type DueListGroup } from '@/features/schedules/due-list';
-import { maintenanceStore } from '../../modules/maintenance-store';
+import { calculateDue, type DueCalculation } from '@/features/schedules/due-calculator';
+import { dueStateRank, dueTone, intervalFraction, statusLine } from '@/features/schedules/due-format';
+import { civilToday, formatMilliMiles } from '@/utils/local-values';
+import { maintenanceStore, type GarageVehicle, type MaintenanceSchedule } from '../../modules/maintenance-store';
+
+type DueItem = Readonly<{ schedule: MaintenanceSchedule; due: DueCalculation }>;
+type VehicleDue = Readonly<{ vehicle: GarageVehicle; items: DueItem[]; dueCount: number; soonCount: number }>;
 
 export default function DueScreen() {
-  const [groups, setGroups] = useState<DueListGroup[]>([]);
+  const [vehicles, setVehicles] = useState<GarageVehicle[]>([]);
+  const [groups, setGroups] = useState<VehicleDue[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       setError(null);
+      const today = civilToday();
       const vehicles = await maintenanceStore.product.getVehicles();
-      const schedules = await Promise.all(vehicles.map(async (vehicle) => (await maintenanceStore.product.getMaintenanceSchedules(vehicle.id)).map((schedule) => ({ vehicleId: vehicle.id, vehicleName: vehicle.nickname, schedule, currentOdometerMilliMiles: vehicle.currentOdometerMilliMiles }))));
-      setGroups(buildDueList(schedules.flat(), civilToday()));
+      setVehicles(vehicles);
+      const built = await Promise.all(
+        vehicles.map(async (vehicle): Promise<VehicleDue> => {
+          const schedules = await maintenanceStore.product.getMaintenanceSchedules(vehicle.id);
+          const items = schedules
+            .map((schedule) => ({ schedule, due: calculateDue(schedule, vehicle.currentOdometerMilliMiles, today) }))
+            .sort((left, right) => dueStateRank[left.due.state] - dueStateRank[right.due.state] || left.schedule.serviceName.localeCompare(right.schedule.serviceName));
+          return {
+            vehicle,
+            items,
+            dueCount: items.filter((item) => item.due.state === 'due').length,
+            soonCount: items.filter((item) => item.due.state === 'due_soon').length,
+          };
+        }),
+      );
+      setGroups(built.filter((group) => group.items.length > 0));
     } catch {
       setError('Due status could not be loaded. Try again.');
     } finally {
       setLoading(false);
     }
   }, []);
-  useFocusEffect(useCallback(() => {
-    void load();
-    const refreshAtMidnight = () => {
-      const now = new Date();
-      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
-      return setTimeout(() => { void load(); timeout = refreshAtMidnight(); }, midnight - now.getTime() + 100);
-    };
-    let timeout = refreshAtMidnight();
-    return () => clearTimeout(timeout);
-  }, [load]));
 
-  return <ThemedView style={styles.screen}><SafeAreaView style={styles.safeArea}><ScrollView contentContainerStyle={styles.content}>
-    <ThemedText accessibilityRole="header" style={styles.title}>Due</ThemedText>
-    <ThemedText style={styles.subtitle}>Maintenance across your active vehicles.</ThemedText>
-    {loading ? <ThemedText style={styles.muted}>Updating due status...</ThemedText> : error ? <View style={styles.empty}><ThemedText accessibilityLiveRegion="polite" style={styles.error}>{error}</ThemedText><Action label="Try again" onPress={() => void load()} /></View> : groups.length === 0 ? <ThemedText style={styles.muted}>Add maintenance schedules in Garage to see due status here.</ThemedText> : groups.map((group) => <View key={group.state} style={styles.group}><ThemedText accessibilityRole="header" style={styles.groupTitle}>{group.state === 'due' ? 'Due now' : group.state === 'due_soon' ? 'Due soon' : 'Current'}</ThemedText>{group.items.map((item) => <Pressable key={item.schedule.id} accessibilityRole="button" accessibilityLabel={`${item.schedule.serviceName} for ${item.vehicleName}, ${dueSummary(item)}. ${dueDetails(item)}`} accessibilityHint="Opens the vehicle's maintenance schedule" onPress={() => router.navigate({ pathname: '/', params: { vehicleId: item.vehicleId, scheduleId: item.schedule.id } })} style={styles.card}><ThemedText style={styles.service}>{item.schedule.serviceName}</ThemedText><ThemedText style={styles.vehicle}>{item.vehicleName}</ThemedText><ThemedText style={styles.status}>{dueSummary(item)}</ThemedText><ThemedText style={styles.detail}>{dueDetails(item)}</ThemedText></Pressable>)}</View>)}
-  </ScrollView></SafeAreaView></ThemedView>;
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+      const refreshAtMidnight = () => {
+        const now = new Date();
+        const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+        return setTimeout(
+          () => {
+            void load();
+            timeout = refreshAtMidnight();
+          },
+          midnight - now.getTime() + 100,
+        );
+      };
+      let timeout = refreshAtMidnight();
+      return () => clearTimeout(timeout);
+    }, [load]),
+  );
+
+  const totals = groups.reduce((sum, group) => ({ due: sum.due + group.dueCount, soon: sum.soon + group.soonCount }), { due: 0, soon: 0 });
+  const openSchedule = (vehicleId: string, scheduleId: string) => router.navigate({ pathname: '/', params: { vehicleId, scheduleId } });
+
+  return (
+    <ThemedView collapsable={false} style={styles.screen}>
+      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <ThemedText accessibilityRole="header" style={styles.title}>
+            Due
+          </ThemedText>
+          {groups.length > 0 ? (
+            <ThemedText style={styles.headerSummary}>
+              {totals.due} due · {totals.soon} soon
+            </ThemedText>
+          ) : null}
+        </View>
+        {loading ? (
+          <ThemedText style={styles.muted}>Updating due status...</ThemedText>
+        ) : error ? (
+          <View style={styles.empty}>
+            <ThemedText accessibilityLiveRegion="polite" style={styles.error}>
+              {error}
+            </ThemedText>
+            <Action label="Try again" onPress={() => void load()} />
+          </View>
+        ) : groups.length === 0 ? (
+          <ThemedText style={styles.muted}>Add maintenance schedules in Garage to see due status here.</ThemedText>
+        ) : (
+          <>
+            {groups.map((group) => (
+              <View key={group.vehicle.id} style={styles.group}>
+                <VehicleHeader vehicle={group.vehicle} />
+                <Card>
+                  {group.items.map((item, index) => (
+                    <DueRow key={item.schedule.id} item={item} last={index === group.items.length - 1} onOpen={() => openSchedule(group.vehicle.id, item.schedule.id)} />
+                  ))}
+                </Card>
+              </View>
+            ))}
+            <Pressable accessibilityRole="button" onPress={() => router.navigate({ pathname: '/' })} style={styles.manageLink}>
+              <ThemedText style={styles.manageText}>Manage schedules</ThemedText>
+            </Pressable>
+          </>
+        )}
+      </ScrollView>
+      <QuickAddFab vehicles={vehicles} />
+    </ThemedView>
+  );
 }
 
-function dueSummary(item: DueListGroup['items'][number]) {
-  const { due } = item;
-  if (due.controllingCondition === 'time' && due.time) return due.time.remainingDays < 0 ? `${Math.abs(due.time.remainingDays)} days overdue` : due.time.remainingDays === 0 ? 'Due today' : `${due.time.remainingDays} days remaining`;
-  if (due.controllingCondition === 'both') return due.state === 'due' ? 'Due by mileage and time' : due.state === 'due_soon' ? 'Due soon by mileage and time' : 'Current by mileage and time';
-  if (due.mileage) { const miles = Number(BigInt(due.mileage.remainingMilliMiles) / 1_000n); return miles <= 0 ? `${Math.abs(miles).toLocaleString()} mi overdue` : `${miles.toLocaleString()} mi remaining`; }
-  return 'Review schedule';
+function VehicleHeader({ vehicle }: Readonly<{ vehicle: GarageVehicle }>) {
+  const model = `${vehicle.year} ${vehicle.make} ${vehicle.model}`.trim();
+  return (
+    <View style={styles.vehicleHeader}>
+      <View style={styles.thumb}>
+        {vehicle.heroPhotoUri ? (
+          <Image source={{ uri: vehicle.heroPhotoUri }} style={styles.thumbImage} accessibilityLabel={`${vehicle.nickname} photo`} />
+        ) : null}
+      </View>
+      <View style={styles.vehicleHeaderText}>
+        <ThemedText style={styles.vehicleName}>{model}</ThemedText>
+        <ThemedText style={styles.vehicleMeta}>{formatMilliMiles(vehicle.currentOdometerMilliMiles, true)} mi est.</ThemedText>
+      </View>
+    </View>
+  );
 }
 
-function dueDetails(item: DueListGroup['items'][number]) {
-  const mileage = item.due.mileage && `Mileage due at ${(BigInt(item.due.mileage.dueAtMilliMiles) / 1_000n).toLocaleString()} mi`;
-  const time = item.due.time && `Time due ${item.due.time.dueOn}`;
-  return [mileage, time].filter(Boolean).join(' · ');
+function DueRow({ item, last, onOpen }: Readonly<{ item: DueItem; last: boolean; onOpen: () => void }>) {
+  const { state } = item.due;
+  const tone = dueTone[state];
+  const status = statusLine(item.due);
+  const actionable = state !== 'current';
+  return (
+    <View style={[styles.row, !last && styles.rowDivider]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${item.schedule.serviceName}, ${status.prefix}${status.detail ? `, ${status.detail}` : ''}`}
+        accessibilityHint="Opens this maintenance schedule"
+        onPress={onOpen}
+        style={styles.rowContent}
+      >
+        <View style={styles.rowMain}>
+          <SeverityDot tone={tone} />
+          <View style={styles.rowText}>
+            <ThemedText style={styles.service}>{item.schedule.serviceName}</ThemedText>
+            <ThemedText style={[styles.status, { color: toneOf(tone).fg }]}>
+              {status.prefix}
+              {status.detail ? ` · ${status.detail}` : ''}
+            </ThemedText>
+          </View>
+          {actionable ? (
+            <Pressable accessibilityRole="button" accessibilityLabel={`Log ${item.schedule.serviceName}`} onPress={onOpen} style={[styles.logButton, state === 'due' ? styles.logButtonDue : styles.logButtonSoon]}>
+              <ThemedText style={state === 'due' ? styles.logTextDue : styles.logTextSoon}>Log</ThemedText>
+            </Pressable>
+          ) : (
+            <Chevron />
+          )}
+        </View>
+        {actionable ? <ProgressBar fraction={intervalFraction(item.due, item.schedule)} tone={tone} /> : null}
+      </Pressable>
+    </View>
+  );
 }
 
-function civilToday() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
-function Action({ label, onPress }: Readonly<{ label: string; onPress: () => void }>) { return <Pressable accessibilityRole="button" onPress={onPress} style={styles.action}><ThemedText style={styles.actionText}>{label}</ThemedText></Pressable>; }
+function Action({ label, onPress }: Readonly<{ label: string; onPress: () => void }>) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={styles.action}>
+      <ThemedText style={styles.actionText}>{label}</ThemedText>
+    </Pressable>
+  );
+}
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: TorqueColors.canvas }, safeArea: { flex: 1 }, content: { gap: Spacing.three, padding: Spacing.four }, title: { color: TorqueColors.text, fontSize: 34, fontWeight: '700' }, subtitle: { color: TorqueColors.secondary }, group: { gap: Spacing.two }, groupTitle: { color: TorqueColors.text, fontSize: 20, fontWeight: '700' }, card: { backgroundColor: TorqueColors.card, borderRadius: 14, gap: Spacing.one, padding: Spacing.three }, service: { color: TorqueColors.text, fontSize: 17, fontWeight: '700' }, vehicle: { color: TorqueColors.secondary }, detail: { color: TorqueColors.secondary, fontSize: 12, lineHeight: 17, marginTop: Spacing.one }, status: { color: TorqueColors.primary, fontWeight: '700', marginTop: Spacing.one }, muted: { color: TorqueColors.secondary }, error: { color: TorqueColors.error }, empty: { gap: Spacing.two }, action: { alignSelf: 'flex-start', backgroundColor: TorqueColors.primary, borderRadius: 10, minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.three }, actionText: { color: '#FFFFFF', fontWeight: '700' },
+  screen: { flex: 1, backgroundColor: TorqueColors.canvas },
+  content: { gap: Spacing.three, padding: Spacing.four },
+  header: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: Spacing.two },
+  title: { color: TorqueColors.text, fontSize: 34, lineHeight: 41, fontWeight: '700' },
+  headerSummary: { color: TorqueColors.secondary, fontSize: 13, marginBottom: Spacing.two },
+  group: { gap: Spacing.two },
+  vehicleHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingHorizontal: Spacing.one },
+  thumb: { width: 36, height: 36, borderRadius: 9, overflow: 'hidden', backgroundColor: TorqueColors.accentSurface },
+  thumbImage: { width: 36, height: 36 },
+  vehicleHeaderText: { flex: 1 },
+  vehicleName: { color: TorqueColors.text, fontSize: 16, fontWeight: '700' },
+  vehicleMeta: { color: TorqueColors.secondary, fontSize: 12 },
+  row: { paddingHorizontal: Spacing.three },
+  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider },
+  rowContent: { paddingVertical: Spacing.two + 4, gap: Spacing.two },
+  rowMain: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  rowText: { flex: 1, gap: 2 },
+  service: { color: TorqueColors.text, fontSize: 16 },
+  status: { fontSize: 13, fontWeight: '600' },
+  logButton: { borderRadius: 100, paddingVertical: 6, paddingHorizontal: 14, minHeight: 32, justifyContent: 'center' },
+  logButtonDue: { backgroundColor: TorqueColors.primary },
+  logButtonSoon: { backgroundColor: TorqueColors.primarySurface },
+  logTextDue: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  logTextSoon: { color: TorqueColors.primary, fontSize: 13, fontWeight: '600' },
+  manageLink: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  manageText: { color: TorqueColors.primary, fontSize: 15 },
+  muted: { color: TorqueColors.secondary },
+  error: { color: TorqueColors.error },
+  empty: { gap: Spacing.two },
+  action: {
+    alignSelf: 'flex-start',
+    backgroundColor: TorqueColors.primary,
+    borderRadius: 10,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+  },
+  actionText: { color: '#FFFFFF', fontWeight: '700' },
 });

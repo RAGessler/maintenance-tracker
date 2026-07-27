@@ -30,30 +30,24 @@ export function FirstRunDisclosure({ onAccepted }: Readonly<{ onAccepted: () => 
     <ThemedView style={styles.screen}>
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content}>
-          <View style={styles.icon}><ThemedText style={styles.iconText}>TL</ThemedText></View>
+          <View style={styles.icon}>
+            <ThemedText style={styles.iconText}>TL</ThemedText>
+          </View>
           <ThemedText accessibilityRole="header" style={styles.title}>
             {detailsVisible ? 'What is collected, kept, and deleted' : 'Everything lives on this iPhone'}
           </ThemedText>
           {!detailsVisible && <ThemedText style={styles.intro}>Read this before you add a vehicle or turn on tracking. It will not change quietly later.</ThemedText>}
           {detailsVisible ? <DisclosureDetails /> : <DisclosureSummary />}
-          {error && <ThemedText accessibilityLiveRegion="polite" style={styles.error}>{error}</ThemedText>}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={detailsVisible ? 'Start using Maintenance Tracker' : 'I understand, continue'}
-            disabled={saving}
-            onPress={detailsVisible ? accept : () => setDetailsVisible(true)}
-            style={({ pressed }) => [styles.primaryButton, (pressed || saving) && styles.pressed]}>
-            <ThemedText style={styles.primaryButtonText}>
-              {saving ? 'Saving...' : detailsVisible ? 'Start using Maintenance Tracker' : 'I understand - continue'}
+          {error && (
+            <ThemedText accessibilityLiveRegion="polite" style={styles.error}>
+              {error}
             </ThemedText>
+          )}
+          <Pressable accessibilityRole="button" accessibilityLabel={detailsVisible ? 'Start using Maintenance Tracker' : 'I understand, continue'} disabled={saving} onPress={detailsVisible ? accept : () => setDetailsVisible(true)} style={({ pressed }) => [styles.primaryButton, (pressed || saving) && styles.pressed]}>
+            <ThemedText style={styles.primaryButtonText}>{saving ? 'Saving...' : detailsVisible ? 'Start using Maintenance Tracker' : 'I understand - continue'}</ThemedText>
           </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setDetailsVisible(!detailsVisible)}
-            style={({ pressed }) => pressed && styles.pressed}>
-            <ThemedText type="linkPrimary">
-              {detailsVisible ? 'Back to summary' : 'Read the full data summary'}
-            </ThemedText>
+          <Pressable accessibilityRole="button" onPress={() => setDetailsVisible(!detailsVisible)} style={({ pressed }) => pressed && styles.pressed}>
+            <ThemedText type="linkPrimary">{detailsVisible ? 'Back to summary' : 'Read the full data summary'}</ThemedText>
           </Pressable>
         </ScrollView>
       </SafeAreaView>
@@ -85,24 +79,75 @@ function DisclosureDetails() {
 }
 
 function DisclosureRow({ title, detail, last = false }: Readonly<{ title: string; detail: string; last?: boolean }>) {
-  return <View style={[styles.row, last && styles.lastRow]}><ThemedText style={styles.rowTitle}>{title}</ThemedText><ThemedText style={styles.rowDetail}>{detail}</ThemedText></View>;
+  return (
+    <View style={[styles.row, last && styles.lastRow]}>
+      <ThemedText style={styles.rowTitle}>{title}</ThemedText>
+      <ThemedText style={styles.rowDetail}>{detail}</ThemedText>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
   safeArea: { flex: 1 },
-  content: { flexGrow: 1, padding: Spacing.four, justifyContent: 'center', gap: Spacing.three },
-  icon: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#E5F1FF', alignItems: 'center', justifyContent: 'center' },
-  iconText: { color: TorqueColors.primary, fontWeight: '800', letterSpacing: 1 },
-  title: { color: TorqueColors.text, fontSize: 27, lineHeight: 33, fontWeight: '700' },
+  content: {
+    flexGrow: 1,
+    padding: Spacing.four,
+    justifyContent: 'center',
+    gap: Spacing.three,
+  },
+  icon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: TorqueColors.accentSurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconText: {
+    color: TorqueColors.primary,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  title: {
+    color: TorqueColors.text,
+    fontSize: 27,
+    lineHeight: 33,
+    fontWeight: '700',
+  },
   intro: { color: TorqueColors.secondary, fontSize: 15, lineHeight: 21 },
-  group: { borderRadius: Spacing.three, backgroundColor: TorqueColors.card, paddingHorizontal: Spacing.three },
-  row: { paddingVertical: Spacing.three, gap: Spacing.half, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider },
+  group: {
+    borderRadius: Spacing.three,
+    backgroundColor: TorqueColors.card,
+    paddingHorizontal: Spacing.three,
+  },
+  row: {
+    paddingVertical: Spacing.three,
+    gap: Spacing.half,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: TorqueColors.divider,
+  },
   lastRow: { borderBottomWidth: 0 },
-  rowTitle: { color: TorqueColors.text, fontSize: 16, lineHeight: 21, fontWeight: '600' },
+  rowTitle: {
+    color: TorqueColors.text,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
   rowDetail: { color: TorqueColors.secondary, fontSize: 13, lineHeight: 18 },
-  primaryButton: { minHeight: 50, borderRadius: 12, backgroundColor: TorqueColors.primary, justifyContent: 'center', alignItems: 'center', paddingHorizontal: Spacing.three },
-  primaryButtonText: { color: '#FFFFFF', fontWeight: '700', textAlign: 'center' },
+  primaryButton: {
+    minHeight: 50,
+    borderRadius: 12,
+    backgroundColor: TorqueColors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.three,
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   error: { color: TorqueColors.error },
   pressed: { opacity: 0.65 },
 });

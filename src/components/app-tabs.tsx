@@ -1,15 +1,10 @@
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
-import { useColorScheme } from 'react-native';
 
-import { Colors, TorqueColors } from '@/constants/theme';
+import { TorqueColors } from '@/constants/theme';
 
 export default function AppTabs() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
-
   return (
     <NativeTabs
-      backgroundColor={colors.background}
       indicatorColor={TorqueColors.primary}
       labelStyle={{ selected: { color: TorqueColors.primary } }}>
       <NativeTabs.Trigger name="index">
