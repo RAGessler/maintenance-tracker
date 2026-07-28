@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Link, router, type Href, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { ActionSheetIOS, Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActionSheetIOS, Alert, AppState, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 
 import { QuickAddFab } from '@/components/quick-add';
@@ -12,7 +12,7 @@ import { VehicleDashboard } from '@/components/vehicle-dashboard';
 import { ScheduleManager } from '@/features/schedules/schedule-manager';
 import { calculateDue } from '@/features/schedules/due-calculator';
 import { Spacing, TorqueColors } from '@/constants/theme';
-import { civilToday, formatMilliMiles, isCivilDate, isMileage, mileageToMilliMiles as toMilliMiles } from '@/utils/local-values';
+import { civilToday, isCivilDate, isMileage, mileageToMilliMiles as toMilliMiles } from '@/utils/local-values';
 import { maintenanceStore, type GarageVehicle, type ManualOdometerReading, type TrackingSetup, type TrackingSnapshot } from '../../modules/maintenance-store';
 
 /** Per-vehicle due rollup shown on the garage card badge. */
@@ -66,6 +66,12 @@ export function GarageScreen() {
   }, []);
 
   useFocusEffect(loadVehicles);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void loadVehicles();
+    });
+    return () => subscription.remove();
+  }, [loadVehicles]);
 
   if (adding) {
     return (
@@ -420,25 +426,16 @@ function VehicleEditor({
     ]);
   const changePhoto = async () => {
     setError(null);
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      quality: 1,
-    });
-    if (result.canceled) return;
-    const photo = result.assets[0];
-    if (photo.fileSize && photo.fileSize > 10_000_000) {
-      setError('Choose an image smaller than 10 MB.');
-      return;
-    }
     try {
+      const sourceUri = await chooseHeroPhoto();
+      if (!sourceUri) return;
       await maintenanceStore.product.replaceHeroPhoto({
         vehicleId: vehicle.id,
-        sourceUri: photo.uri,
+        sourceUri,
       });
       onChanged();
-    } catch {
-      setError('The photo could not be added. Your current photo is unchanged.');
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'The photo could not be added. Your current photo is unchanged.');
     }
   };
   const removePhoto = async () => {
@@ -545,12 +542,7 @@ function TrackingSetupStatus({ vehicleId, vehicleName }: Readonly<{ vehicleId: s
       </ThemedText>
     );
   if (!setup) return <ThemedText style={styles.formIntro}>Checking automatic tracking setup...</ThemedText>;
-  const requirements = [
-    { ready: setup.locationReady, title: 'Precise Always Location', done: 'Granted', todo: 'Grant precise, always-on location' },
-    { ready: setup.automationsReady, title: 'Start & End Trip Shortcuts', done: 'Run Immediately set', todo: 'Add both with Run Immediately' },
-    { ready: setup.routeReady, title: 'Route observation', done: 'Captured', todo: 'Complete one supported route' },
-    { ready: setup.testReady, title: 'Setup test', done: 'Passed', todo: 'Not run yet' },
-  ];
+  const requirements = [{ ready: setup.locationReady, title: 'Precise Always Location', done: 'Granted', todo: 'Grant precise, always-on location' }];
   const remaining = requirements.filter((requirement) => !requirement.ready).length;
   const firstIncomplete = requirements.findIndex((requirement) => !requirement.ready);
   const ready = setup.state === 'ready';
@@ -578,7 +570,7 @@ function TrackingSetupStatus({ vehicleId, vehicleName }: Readonly<{ vehicleId: s
           );
         })}
       </Card>
-      <ThemedText style={styles.setupHint}>Trips start and end only from Shortcuts you create. The app never watches Bluetooth on its own.</ThemedText>
+      <ThemedText style={styles.setupHint}>Create Bluetooth automations in Apple Shortcuts using this app&apos;s Start Trip and End Trip actions. The app uses Precise Always Location to measure movement while a trip is active.</ThemedText>
     </View>
   );
 }
@@ -742,7 +734,17 @@ function VehicleForm({
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState<Partial<Record<keyof Draft, boolean>>>({});
   const [error, setError] = useState<string | null>(null);
+  const [photoUri, setPhotoUri] = useState<string>();
   const validation = validate(draft);
+
+  const choosePhoto = async () => {
+    setError(null);
+    try {
+      setPhotoUri((await chooseHeroPhoto()) ?? undefined);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'The photo could not be selected. Try again.');
+    }
+  };
 
   const save = async () => {
     if (validation) return;
@@ -756,12 +758,28 @@ function VehicleForm({
         model: draft.model.trim(),
         initialOdometerMilliMiles: toMilliMiles(draft.odometer),
       });
+      let savedPhotoUri: string | undefined;
+      if (photoUri) {
+        try {
+          await maintenanceStore.product.replaceHeroPhoto({
+            vehicleId: vehicle.id,
+            sourceUri: photoUri,
+          });
+          savedPhotoUri = photoUri;
+        } catch {
+          savedPhotoUri = undefined;
+        }
+      }
       onCreated({
         ...vehicle,
         currentOdometerMilliMiles: toMilliMiles(draft.odometer),
         scheduleCount: 0,
         trackingReadiness: 'manual_only',
+        heroPhotoUri: savedPhotoUri,
       });
+      if (photoUri && !savedPhotoUri) {
+        setTimeout(() => Alert.alert('Vehicle saved', 'The vehicle was created, but its photo could not be added. You can add it from the vehicle profile.'), 0);
+      }
     } catch {
       setError('The vehicle could not be saved. Your information is still here. Try again.');
     } finally {
@@ -783,19 +801,23 @@ function VehicleForm({
               <ThemedText style={[styles.navigationAction, (validation || saving) && styles.disabled]}>Save</ThemedText>
             </Pressable>
           </View>
-          <View style={styles.photoPanel}>
-            <SymbolView
-              name={{
-                ios: 'photo.badge.plus',
-                android: 'add_a_photo',
-                web: 'image',
-              }}
-              tintColor={TorqueColors.primary}
-              size={28}
-            />
-            <ThemedText style={styles.photoTitle}>Add a hero photo after saving</ThemedText>
+          <Pressable accessibilityRole="button" accessibilityLabel="Hero photo" accessibilityHint="Opens the photo library" onPress={() => void choosePhoto()} style={styles.photoPanel}>
+            {photoUri ? (
+              <Image source={{ uri: photoUri }} style={styles.photoPreview} accessibilityLabel="Selected hero photo" />
+            ) : (
+              <SymbolView
+                name={{
+                  ios: 'photo.badge.plus',
+                  android: 'add_a_photo',
+                  web: 'image',
+                }}
+                tintColor={TorqueColors.primary}
+                size={28}
+              />
+            )}
+            <ThemedText style={styles.photoTitle}>{photoUri ? 'Hero photo selected' : 'Add a hero photo'}</ThemedText>
             <ThemedText style={styles.photoDetail}>Optional</ThemedText>
-          </View>
+          </Pressable>
           <ThemedText style={styles.formIntro}>Your current odometer is the first authoritative manual baseline.</ThemedText>
           <View style={styles.fieldGroup}>
             <Field label="Nickname" value={draft.nickname} onChangeText={(nickname) => setDraft({ ...draft, nickname })} onBlur={() => setTouched({ ...touched, nickname: true })} error={touched.nickname && !draft.nickname.trim() ? 'Nickname is required.' : undefined} />
@@ -812,6 +834,21 @@ function VehicleForm({
         </ScrollView>
     </ThemedView>
   );
+}
+
+async function chooseHeroPhoto(): Promise<string | null> {
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsEditing: true,
+    quality: 1,
+  });
+  if (result.canceled) return null;
+  const photo = result.assets[0];
+  if (!photo) return null;
+  if (photo.fileSize && photo.fileSize > 10_000_000) {
+    throw new Error('Choose an image smaller than 10 MB.');
+  }
+  return photo.uri;
 }
 
 function Field({ label, error, ...props }: Readonly<{ label: string; error?: string } & React.ComponentProps<typeof TextInput>>) {
@@ -843,7 +880,11 @@ function validate(draft: Draft) {
 }
 
 function formatMiles(milliMiles: string) {
-  return formatMilliMiles(milliMiles, true);
+  const roundedTenths = (BigInt(milliMiles) + 50n) / 100n;
+  const whole = roundedTenths / 10n;
+  const tenth = roundedTenths % 10n;
+  const wholeText = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${wholeText}${tenth === 0n ? '' : `.${tenth}`}`;
 }
 
 function formatDate(effectiveAt: string) {

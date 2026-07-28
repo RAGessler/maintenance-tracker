@@ -1,6 +1,6 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import { createMaintenanceStore, type Bootstrap, type GarageVehicle, type MaintenanceRecord, type ManualOdometerReading, type NativeMaintenanceStore, type OdometerFacts, type RecoveryState, type ReviewTripInput, type TrackingSetup, type TrackingSnapshot, type Trip, type TripRevision, type Vehicle } from './MaintenanceStore';
+import { createMaintenanceStore, type Bootstrap, type GarageVehicle, type LocationPermissionStatus, type MaintenanceRecord, type ManualOdometerReading, type NativeMaintenanceStore, type OdometerFacts, type RecoveryState, type ReviewTripInput, type TrackingSetup, type TrackingSnapshot, type Trip, type TripRevision, type Vehicle } from './MaintenanceStore';
 
 declare class MaintenanceStoreModule extends NativeModule<{}> implements NativeMaintenanceStore {
   getBootstrap(): Promise<Bootstrap>;
@@ -24,6 +24,8 @@ declare class MaintenanceStoreModule extends NativeModule<{}> implements NativeM
   getOdometerFacts(vehicleId: string): Promise<OdometerFacts>;
   getTrackingSnapshot(): Promise<TrackingSnapshot>;
   getTrackingSetup(vehicleId: string): Promise<TrackingSetup>;
+  getLocationPermissionStatus(): Promise<LocationPermissionStatus>;
+  requestLocationPermission(): Promise<LocationPermissionStatus>;
   startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
   stopTracking(): Promise<TrackingSnapshot>;
   getTrips(vehicleId: string): Promise<Trip[]>;

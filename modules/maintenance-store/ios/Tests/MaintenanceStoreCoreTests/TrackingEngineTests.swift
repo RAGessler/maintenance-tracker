@@ -1,13 +1,17 @@
 import Testing
 @testable import MaintenanceStoreCore
 
-@Test("automatic trips only confirm after trigger route movement and normal completion")
-func confirmsOnlyCompleteCorroboratedAutomaticTrip() throws {
+@Test("converts GPS meters to milli-miles without inflating mileage")
+func convertsMetersToMilliMiles() {
+  #expect(metersToMilliMiles(6_437.376) == 4_000)
+}
+
+@Test("automatic trips confirm after Shortcut movement and normal completion")
+func confirmsCompleteAutomaticTripWithoutRouteObservation() throws {
   let repository = InMemoryTrackingRepository()
   let engine = TrackingEngine(repository: repository)
 
   try engine.startAutomatic(vehicleID: 7, now: 0)
-  try engine.receive(route: .matching, now: 1)
   try engine.receive(location: .init(timestamp: 2, speedMetersPerSecond: 3, displacementMeters: 0, distanceMilliMiles: 0), now: 2)
   try engine.receive(location: .init(timestamp: 3, speedMetersPerSecond: 4, displacementMeters: 10, distanceMilliMiles: 1_250), now: 3)
   try engine.end(vehicleID: 7, now: 4)
@@ -16,8 +20,8 @@ func confirmsOnlyCompleteCorroboratedAutomaticTrip() throws {
   #expect(repository.currentSession == nil)
 }
 
-@Test("automatic trips fail closed when route corroboration is missing")
-func retainsReviewCandidateWithoutRouteCorroboration() throws {
+@Test("automatic trips confirm without route corroboration")
+func confirmsAutomaticTripWithoutRouteCorroboration() throws {
   let repository = InMemoryTrackingRepository()
   let engine = TrackingEngine(repository: repository)
 
@@ -25,7 +29,22 @@ func retainsReviewCandidateWithoutRouteCorroboration() throws {
   try engine.receive(location: .init(timestamp: 1, speedMetersPerSecond: 3, displacementMeters: 0, distanceMilliMiles: 500), now: 1)
   try engine.end(vehicleID: 7, now: 2)
 
-  #expect(repository.finalizations == [.init(disposition: .reviewRequired, completion: .explicitEnd, reason: .routeNotCorroborated, distanceMilliMiles: 500)])
+  #expect(repository.finalizations == [.init(disposition: .confirmed, completion: .explicitEnd, reason: nil, distanceMilliMiles: 500)])
+}
+
+@Test("automatic trips without movement finalize as review candidates")
+func finalizesNoMovementWithoutRevisionConstraintFailure() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 0)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 1)
+
+  let engine = TrackingEngine(repository: store)
+  try engine.startAutomatic(vehicleID: vehicle.id, now: 2)
+  try engine.end(vehicleID: vehicle.id, now: 3)
+
+  let trip = try #require(store.trips(for: vehicle.id).first)
+  #expect(trip.disposition == "review_required")
+  #expect(trip.failureReason == "movement_not_confirmed")
 }
 
 @Test("route loss enters grace and matching reconnect resumes the same session")
@@ -77,11 +96,9 @@ func atomicallyFinalizesPersistedAutomaticTrip() throws {
   let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 1)
   try store.configureShortcut(for: vehicle.id, mode: "bluetooth_shortcut", now: 2)
   try store.recordShortcutTest(for: vehicle.id, now: 3)
-  try store.recordRouteObservation(for: vehicle.id, kind: "bluetooth_route", opaqueValue: "route", now: 4)
   let engine = TrackingEngine(repository: store)
 
   try engine.startAutomatic(vehicleID: vehicle.id, now: 5)
-  try engine.receive(route: .matching, now: 6)
   try engine.receive(location: .init(timestamp: 7, speedMetersPerSecond: 3, displacementMeters: 0, distanceMilliMiles: 900), now: 7)
   try engine.end(vehicleID: vehicle.id, now: 8)
 

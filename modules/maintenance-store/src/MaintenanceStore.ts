@@ -117,11 +117,9 @@ export type TrackingSetup = Readonly<{
   vehicleId: string;
   state: 'incomplete' | 'ready';
   locationReady: boolean;
-  automationsReady: boolean;
-  routeReady: boolean;
-  checklistReady: boolean;
-  testReady: boolean;
 }>;
+
+export type LocationPermissionStatus = 'not_determined' | 'when_in_use' | 'always' | 'always_reduced' | 'denied' | 'restricted' | 'unavailable';
 
 export type Trip = Readonly<{
   id: string;
@@ -166,6 +164,8 @@ export interface NativeMaintenanceStore {
   ): Promise<Vehicle>;
   getTrackingSnapshot(): Promise<TrackingSnapshot>;
   getTrackingSetup?(vehicleId: string): Promise<TrackingSetup>;
+  getLocationPermissionStatus?(): Promise<LocationPermissionStatus>;
+  requestLocationPermission?(): Promise<LocationPermissionStatus>;
   startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
   stopTracking(): Promise<TrackingSnapshot>;
   getTrips?(vehicleId: string): Promise<Trip[]>;
@@ -220,6 +220,8 @@ export type MaintenanceStore = Readonly<{
   tracking: Readonly<{
     getSnapshot(): Promise<TrackingSnapshot>;
     getSetup(vehicleId: string): Promise<TrackingSetup>;
+    getLocationPermissionStatus(): Promise<LocationPermissionStatus>;
+    requestLocationPermission(): Promise<LocationPermissionStatus>;
     start(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
     stop(): Promise<TrackingSnapshot>;
     getTrips(vehicleId: string): Promise<Trip[]>;
@@ -325,6 +327,11 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
       getSetup: (vehicleId) => {
         if (typeof native.getTrackingSetup !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage automatic tracking setup.'));
         return native.getTrackingSetup(vehicleId);
+      },
+      getLocationPermissionStatus: () => native.getLocationPermissionStatus?.() ?? Promise.resolve('unavailable'),
+      requestLocationPermission: () => {
+        if (typeof native.requestLocationPermission !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage location permissions.'));
+        return native.requestLocationPermission();
       },
       start: (vehicleId, source) => native.startTracking(vehicleId, source),
       stop: () => native.stopTracking(),

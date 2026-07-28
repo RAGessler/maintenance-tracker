@@ -29,6 +29,10 @@ public struct TrackingLocation: Equatable, Sendable {
   }
 }
 
+public func metersToMilliMiles(_ meters: Double) -> Int64 {
+  Int64((meters / 1_609.344 * 1_000).rounded())
+}
+
 public struct TrackingSession: Equatable, Sendable {
   public let vehicleID: Int64
   public let source: TrackingSource
@@ -142,9 +146,9 @@ public final class TrackingEngine {
   }
 
   private func finish(_ session: TrackingSession, completion: TrackingCompletion, reason: TrackingFailure?, now: Int64) throws {
-    let automaticConfirmed = session.source == .automatic && session.routeEvidence == .matching && session.movementObserved && session.cumulativeMilliMiles > 0 && completion == .explicitEnd && reason == nil
+    let automaticConfirmed = session.source == .automatic && session.movementObserved && session.cumulativeMilliMiles > 0 && completion == .explicitEnd && reason == nil
     let manualConfirmed = session.source == .manual && session.movementObserved && session.cumulativeMilliMiles > 0 && reason == nil
-    let fallbackReason: TrackingFailure? = reason ?? (!session.movementObserved ? .movementNotConfirmed : session.source == .automatic && session.routeEvidence != .matching ? .routeNotCorroborated : nil)
+    let fallbackReason: TrackingFailure? = reason ?? (!session.movementObserved ? .movementNotConfirmed : nil)
     try repository.finalize(TrackingFinalization(disposition: automaticConfirmed || manualConfirmed ? .confirmed : .reviewRequired, completion: completion, reason: fallbackReason, distanceMilliMiles: session.cumulativeMilliMiles), session: session, now: now)
   }
 }

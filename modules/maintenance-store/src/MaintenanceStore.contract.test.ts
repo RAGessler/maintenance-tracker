@@ -116,7 +116,7 @@ test('trip-tracking forwards only typed foundation commands', async () => {
   assert.deepEqual(await store.tracking.start('7', 'automatic'), { state: 'tracking' });
   assert.deepEqual(await store.tracking.stop(), { state: 'idle' });
   assert.deepEqual(calls, [['7', 'automatic'], []]);
-  assert.deepEqual(Object.keys(store.tracking).sort(), ['getRevisions', 'getSetup', 'getSnapshot', 'getTrips', 'review', 'start', 'stop']);
+  assert.deepEqual(Object.keys(store.tracking).sort(), ['getLocationPermissionStatus', 'getRevisions', 'getSetup', 'getSnapshot', 'getTrips', 'requestLocationPermission', 'review', 'start', 'stop']);
 });
 
 test('trip-tracking exposes reviewed manual trips without persistence internals', async () => {
@@ -160,14 +160,14 @@ test('trip-tracking exposes vehicle setup state without route identifiers', asyn
     startTracking: async () => ({ state: 'tracking' as const }), stopTracking: async () => ({ state: 'idle' as const }),
     getTrackingSetup: async (...args: unknown[]) => {
       calls.push(args);
-      return { vehicleId: '7', state: 'incomplete', locationReady: false, automationsReady: false, routeReady: false, checklistReady: false, testReady: false };
+      return { vehicleId: '7', state: 'incomplete', locationReady: false };
     },
   } as unknown as NativeMaintenanceStore;
 
   const setup = await createMaintenanceStore(native).tracking.getSetup('7');
 
   assert.deepEqual(calls, [['7']]);
-  assert.deepEqual(setup, { vehicleId: '7', state: 'incomplete', locationReady: false, automationsReady: false, routeReady: false, checklistReady: false, testReady: false });
+  assert.deepEqual(setup, { vehicleId: '7', state: 'incomplete', locationReady: false });
 });
 
 test('trip-tracking exposes an ordered audit trail without storage internals', async () => {

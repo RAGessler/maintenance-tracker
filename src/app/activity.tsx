@@ -120,7 +120,7 @@ export default function ActivityScreen() {
     );
   }
 
-  const history = buildActivityHistory({ trips, records, readings }).filter((fact) => (fact.kind !== 'trip' || fact.trip.disposition !== 'review_required') && (filter === 'all' || fact.kind === filterKinds[filter]));
+  const history = buildActivityHistory({ trips, records, readings }).filter((fact) => (fact.kind !== 'trip' || fact.trip.disposition === 'confirmed') && (filter === 'all' || fact.kind === filterKinds[filter]));
   const { today, earlier } = splitByDay(history);
   const reviewRequired = trips.filter((trip) => trip.disposition === 'review_required');
   return (
@@ -270,7 +270,7 @@ function TripReview({
                     accessibilityRole="button"
                     disabled={saving}
                     onPress={() =>
-                      Alert.alert('Reject this trip?', 'Its mileage will not be added. The rejected trip will remain in Activity.', [
+                      Alert.alert('Reject this trip?', 'Its mileage will not be added. The rejected trip will be removed from Activity history.', [
                         { text: 'Cancel', style: 'cancel' },
                         {
                           text: 'Reject trip',

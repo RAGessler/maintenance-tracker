@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, useColorScheme } from 'react-native';
 import { BottomSheet, Button, Divider, Group, Host, HStack, Image, Spacer, Text, VStack } from '@expo/ui/swift-ui';
 import {
   background,
@@ -35,8 +35,11 @@ export function QuickAddFab({ vehicles }: Readonly<{ vehicles: GarageVehicle[] }
   const [content, setContent] = useState<SheetContent>('actions');
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [openVehiclePickerAfterDismiss, setOpenVehiclePickerAfterDismiss] = useState(false);
+  const colorScheme = useColorScheme();
 
   if (vehicles.length === 0) return null;
+
+  const sheetBackground = colorScheme === 'dark' ? '#000000' : '#F2F2F7';
 
   const queue = (action: PendingAction) => {
     setPendingAction(action);
@@ -92,7 +95,7 @@ export function QuickAddFab({ vehicles }: Readonly<{ vehicles: GarageVehicle[] }
           onIsPresentedChange={setIsPresented}
           onDismiss={handleDismiss}
           fitToContents>
-          <Group modifiers={[presentationBackground('#F2F2F7'), presentationDragIndicator('visible')]}> 
+          <Group modifiers={[presentationBackground(sheetBackground), presentationDragIndicator('visible')]}>
             {content === 'actions' ? (
               <ActionMenu onClose={() => setIsPresented(false)} onMaintenance={() => queue('record')} onOdometer={openOdometer} onTrip={() => queue('trip')} />
             ) : (
@@ -117,7 +120,7 @@ function ActionMenu({
   onTrip: () => void;
 }>) {
   return (
-    <VStack spacing={12} modifiers={[padding({ top: 4, bottom: 24, horizontal: 16 })]}>
+    <VStack spacing={12} modifiers={[padding({ top: 16, bottom: 24, horizontal: 16 })]}>
       <SheetHeader title="Quick Add" onClose={onClose} />
       <VStack spacing={0} modifiers={[background(TorqueColors.card, shapes.roundedRectangle({ cornerRadius: 14 }))]}>
         <ActionRow label="Log maintenance" symbol="wrench.and.screwdriver.fill" tone="maintenance" onPress={onMaintenance} />

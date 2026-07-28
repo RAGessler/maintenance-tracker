@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 
-public enum LocalStoreError: Error, Equatable {
+public enum LocalStoreError: Error, Equatable, LocalizedError {
   case invalidVehicle
   case invalidMaintenanceRecord
   case invalidMaintenanceSchedule
@@ -9,8 +9,26 @@ public enum LocalStoreError: Error, Equatable {
   case invalidPhoto
   case disclosureRequired
   case trackingConflict
+  case trackingPermissionRequired
+  case trackingSetupIncomplete
   case sqlite(String)
   case unsupportedSchema(Int)
+
+  public var errorDescription: String? {
+    switch self {
+    case .invalidVehicle: return "The selected vehicle is no longer available."
+    case .invalidMaintenanceRecord: return "The maintenance record is invalid."
+    case .invalidMaintenanceSchedule: return "The maintenance schedule is invalid."
+    case .invalidTrip: return "The trip is invalid."
+    case .invalidPhoto: return "The photo could not be read or is too large."
+    case .disclosureRequired: return "Open Maintenance Tracker and accept the data-use disclosure first."
+    case .trackingConflict: return "A different trip is already active for this vehicle."
+    case .trackingPermissionRequired: return "Allow Precise Location and Always location access for Maintenance Tracker, then try again."
+    case .trackingSetupIncomplete: return "Open Maintenance Tracker and complete automatic tracking setup for this vehicle before using the Shortcut."
+    case let .sqlite(message): return message
+    case let .unsupportedSchema(version): return "This app cannot read local data version \(version). Rebuild or update Maintenance Tracker."
+    }
+  }
 }
 
 public struct StoredVehicle: Sendable, Equatable {
@@ -98,10 +116,6 @@ public struct StoredTrackingSetup: Sendable, Equatable {
   public let vehicleId: Int64
   public let state: String
   public let locationReady: Bool
-  public let automationsReady: Bool
-  public let routeReady: Bool
-  public let checklistReady: Bool
-  public let testReady: Bool
 }
 
 /// The only owner of SQLite connections and durable product writes.
@@ -485,23 +499,11 @@ public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
     guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
       throw LocalStoreError.invalidVehicle
     }
-    let configuration = try queryOne(
-      "SELECT setup_completed_at IS NOT NULL, tested_at IS NOT NULL FROM trigger_configuration WHERE vehicle_id = ?",
-      [.integer(vehicleId)]
-    )
-    let automationsReady = configuration?[0] == 1
-    let testReady = configuration?[1] == 1
-    let routeReady = try queryOne("SELECT id FROM route_binding WHERE vehicle_id = ?", [.integer(vehicleId)]) != nil
-    let checklistReady = automationsReady && routeReady
-    let isReady = locationReady && automationsReady && routeReady && checklistReady && testReady
+    let isReady = locationReady
     return StoredTrackingSetup(
       vehicleId: vehicleId,
       state: isReady ? "ready" : "incomplete",
-      locationReady: locationReady,
-      automationsReady: automationsReady,
-      routeReady: routeReady,
-      checklistReady: checklistReady,
-      testReady: testReady
+      locationReady: locationReady
     )
   }
 
@@ -611,12 +613,6 @@ public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
       guard activeSession.vehicleID == vehicleID, activeSession.source == .automatic else { throw LocalStoreError.trackingConflict }
       return activeSession
     }
-    try transaction {
-      guard try queryOne("SELECT id FROM trigger_configuration WHERE vehicle_id = ? AND setup_completed_at IS NOT NULL AND tested_at IS NOT NULL", [.integer(vehicleID)]) != nil,
-            try queryOne("SELECT id FROM route_binding WHERE vehicle_id = ?", [.integer(vehicleID)]) != nil else {
-        throw LocalStoreError.trackingConflict
-      }
-    }
     try startTracking(vehicleId: vehicleID, source: "automatic", now: now, automaticSetupReady: true)
     guard var session = try session() else { throw LocalStoreError.sqlite("Tracking session was not created") }
     session.movementDeadline = now + 600_000
@@ -661,7 +657,8 @@ public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
       let tripID = try insert("INSERT INTO trip (source, proposed_vehicle_id, started_at, ended_at, captured_milli_miles, movement_outcome, normal_completion_outcome, route_corroboration_outcome, quality_counters_json, failure_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)", [.text(source), .integer(session.vehicleID), .integer(session.startedAt), .integer(now), captured, .text(session.movementObserved ? "confirmed" : "not_confirmed"), .text(completion), .text(route), reason.map(Binding.text) ?? .null])
       let disposition = finalization.disposition == .confirmed ? "confirmed" : "review_required"
       try run("INSERT INTO trip_state (trip_id, vehicle_id, effective_milli_miles, disposition, updated_at) VALUES (?, ?, ?, ?, ?)", [.integer(tripID), .integer(session.vehicleID), effective, .text(disposition), .integer(now)])
-      try run("INSERT INTO trip_revision (trip_id, revision_number, occurred_at, actor, action, vehicle_id, effective_milli_miles, disposition, reason) VALUES (?, 1, ?, 'system', 'finalized', ?, ?, ?, ?)", [.integer(tripID), .integer(now), .integer(session.vehicleID), effective, .text(disposition), reason.map(Binding.text) ?? .null])
+      // Failure detail is stored on trip.failure_reason; this schema keeps revision.reason null.
+      try run("INSERT INTO trip_revision (trip_id, revision_number, occurred_at, actor, action, vehicle_id, effective_milli_miles, disposition, reason) VALUES (?, 1, ?, 'system', 'finalized', ?, ?, ?, NULL)", [.integer(tripID), .integer(now), .integer(session.vehicleID), effective, .text(disposition)])
       try run("DELETE FROM tracking_session WHERE id = 1", [])
     }
   }

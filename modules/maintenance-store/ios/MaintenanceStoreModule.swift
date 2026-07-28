@@ -216,6 +216,17 @@ public class MaintenanceStoreModule: Module {
       return Self.trackingSetupDictionary(try self.localStore().trackingSetup(for: nativeVehicleId, locationReady: locationReady))
     }
 
+    AsyncFunction("getLocationPermissionStatus") { () async -> String in
+      await MainActor.run { MaintenanceTrackingRuntime.shared.locationPermissionStatus() }
+    }
+
+    AsyncFunction("requestLocationPermission") { () async -> String in
+      await MainActor.run {
+        MaintenanceTrackingRuntime.shared.requestLocationPermission()
+        return MaintenanceTrackingRuntime.shared.locationPermissionStatus()
+      }
+    }
+
     AsyncFunction("startTracking") { (vehicleId: String, source: String) throws -> [String: String] in
       guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidVehicle }
       try self.localStore().startTracking(vehicleId: nativeVehicleId, source: source, now: Self.now())
@@ -387,8 +398,6 @@ public class MaintenanceStoreModule: Module {
   private static func trackingSetupDictionary(_ setup: StoredTrackingSetup) -> [String: Any] {
     [
       "vehicleId": String(setup.vehicleId), "state": setup.state, "locationReady": setup.locationReady,
-      "automationsReady": setup.automationsReady, "routeReady": setup.routeReady,
-      "checklistReady": setup.checklistReady, "testReady": setup.testReady,
     ]
   }
 

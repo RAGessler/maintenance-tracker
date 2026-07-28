@@ -23,6 +23,6 @@ export function formatMilliMiles(value: string, groupThousands = false) {
   const milliMiles = BigInt(value);
   const whole = milliMiles / 1_000n;
   const fraction = (milliMiles % 1_000n).toString().padStart(3, '0').replace(/0+$/, '');
-  const wholeText = groupThousands ? whole.toLocaleString() : whole.toString();
+  const wholeText = groupThousands ? whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',') : whole.toString();
   return `${wholeText}${fraction ? `.${fraction}` : ''}`;
 }

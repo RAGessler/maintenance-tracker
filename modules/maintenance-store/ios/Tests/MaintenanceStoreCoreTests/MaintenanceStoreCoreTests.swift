@@ -227,48 +227,40 @@ func archivesAndRestoresVehicleSafely() throws {
   #expect(try scalar(database, "SELECT COUNT(*) FROM trigger_configuration WHERE vehicle_id = \(vehicle.id)") == 0)
 }
 
-@Test("tracking setup reports only readiness facts and never route identifiers")
-func reportsTrackingSetupWithoutRouteIdentifiers() throws {
+@Test("tracking setup reports readiness without route observation")
+func reportsTrackingSetupWithoutRouteObservation() throws {
   let store = try LocalStore(path: ":memory:")
   _ = try store.acceptDisclosure(version: 1, now: 1)
   let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
 
   let setup = try store.trackingSetup(for: vehicle.id)
   #expect(setup.vehicleId == vehicle.id)
-  #expect(setup.automationsReady == false)
-  #expect(setup.routeReady == false)
-  #expect(setup.checklistReady == false)
-  #expect(setup.testReady == false)
+  #expect(setup.state == "incomplete")
 }
 
-@Test("tracking setup requires a tested shortcut and exclusively owned route observation")
-func requiresTestedShortcutAndExclusiveRouteObservation() throws {
+@Test("tracking failures provide actionable Shortcut errors")
+func describesTrackingFailures() {
+  #expect(LocalStoreError.trackingPermissionRequired.errorDescription == "Allow Precise Location and Always location access for Maintenance Tracker, then try again.")
+  #expect(LocalStoreError.trackingSetupIncomplete.errorDescription == "Open Maintenance Tracker and complete automatic tracking setup for this vehicle before using the Shortcut.")
+}
+
+@Test("tracking setup requires only location and no route observation")
+func requiresOnlyLocationWithoutRouteObservation() throws {
   let store = try LocalStore(path: ":memory:")
   _ = try store.acceptDisclosure(version: 1, now: 1)
   let daily = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
   let weekend = try store.createVehicle(nickname: "Weekend", year: 2021, make: "Mazda", model: "MX-5", initialOdometerMilliMiles: 0, now: 3)
 
   try store.configureShortcut(for: daily.id, mode: "wired_carplay_shortcut", now: 4)
-  try store.recordRouteObservation(for: daily.id, kind: "carplay_route", opaqueValue: "carplay-route", now: 5)
   let incomplete = try store.trackingSetup(for: daily.id, locationReady: true)
 
-  #expect(incomplete.state == "incomplete")
-  #expect(incomplete.automationsReady == true)
-  #expect(incomplete.routeReady == true)
-  #expect(incomplete.checklistReady == true)
-  #expect(incomplete.testReady == false)
+  #expect(incomplete.state == "ready")
   #expect(throws: LocalStoreError.trackingConflict) {
     try store.configureShortcut(for: weekend.id, mode: "wired_carplay_shortcut", now: 6)
   }
-  #expect(throws: LocalStoreError.trackingConflict) {
-    try store.recordRouteObservation(for: weekend.id, kind: "carplay_route", opaqueValue: "carplay-route", now: 6)
-  }
-
-  try store.recordShortcutTest(for: daily.id, now: 7)
   #expect(try store.trackingSetup(for: daily.id, locationReady: true).state == "ready")
-  #expect(throws: LocalStoreError.trackingConflict) {
-    try store.startTracking(vehicleId: weekend.id, source: "automatic", now: 8)
-  }
+  _ = try store.beginAutomatic(vehicleID: weekend.id, now: 8)
+  #expect(try store.session()?.vehicleID == weekend.id)
 }
 
 @Test("automatic sessions retain Shortcut attribution and route-observation outcome")
