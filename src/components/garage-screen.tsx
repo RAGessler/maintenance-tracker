@@ -5,6 +5,7 @@ import { ActionSheetIOS, Alert, AppState, Image, Pressable, ScrollView, StyleShe
 import { SymbolView } from 'expo-symbols';
 
 import { QuickAddFab } from '@/components/quick-add';
+import { DetailOverlayHeader, detailHeaderContentInset } from '@/components/detail-overlay-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Card, Chevron, MetaPill, SectionLabel, type Tone } from '@/components/torque-ui';
@@ -462,18 +463,7 @@ function VehicleEditor({
   };
   return (
     <ThemedView collapsable={false} style={styles.screen}>
-        <ScrollView ref={scrollView} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <View style={styles.formNavigation}>
-            <Pressable accessibilityRole="button" onPress={onCancel}>
-              <ThemedText style={styles.navigationAction}>Cancel</ThemedText>
-            </Pressable>
-            <ThemedText accessibilityRole="header" style={styles.formTitle}>
-              Vehicle profile
-            </ThemedText>
-            <Pressable accessibilityRole="button" disabled={!valid || saving} onPress={save}>
-              <ThemedText style={[styles.navigationAction, (!valid || saving) && styles.disabled]}>Save</ThemedText>
-            </Pressable>
-          </View>
+        <ScrollView ref={scrollView} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, styles.detailContent]} keyboardShouldPersistTaps="handled">
           <ThemedText style={styles.formIntro}>Identity fields can be changed here. Odometer readings remain an auditable history and are updated separately.</ThemedText>
           <TrackingSetupStatus vehicleId={vehicle.id} vehicleName={vehicle.nickname} />
           <Pressable accessibilityRole="button" accessibilityLabel="Hero photo" accessibilityHint="Opens photo options" onPress={photoOptions} style={styles.photoPanel}>
@@ -514,7 +504,8 @@ function VehicleEditor({
             </ThemedText>
           )}
           <ActionButton label="Archive vehicle" onPress={archive} />
-        </ScrollView>
+         </ScrollView>
+        <DetailOverlayHeader title="Vehicle profile" leading={{ label: 'Cancel', onPress: onCancel }} trailing={{ label: 'Save', disabled: !valid || saving, onPress: save }} />
     </ThemedView>
   );
 }
@@ -696,18 +687,7 @@ function OdometerReadingForm({
   };
   return (
     <ThemedView collapsable={false} style={styles.screen}>
-        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <View style={styles.formNavigation}>
-            <Pressable accessibilityRole="button" onPress={onCancel}>
-              <ThemedText style={styles.navigationAction}>Cancel</ThemedText>
-            </Pressable>
-            <ThemedText accessibilityRole="header" style={styles.formTitle}>
-              Odometer reading
-            </ThemedText>
-            <Pressable accessibilityRole="button" accessibilityState={{ disabled: !valid || saving }} disabled={!valid || saving} onPress={() => void save()}>
-              <ThemedText style={[styles.navigationAction, (!valid || saving) && styles.disabled]}>Save</ThemedText>
-            </Pressable>
-          </View>
+        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, styles.detailContent]} keyboardShouldPersistTaps="handled">
           <ThemedText style={styles.formIntro}>Enter the dashboard reading. Saving adds an auditable row; it never changes an earlier reading.</ThemedText>
           <View style={styles.fieldGroup}>
             <Field label="Reading date (YYYY-MM-DD)" value={date} onChangeText={setDate} keyboardType="numbers-and-punctuation" error={date && !isCivilDate(date) ? 'Enter a valid calendar date.' : undefined} />
@@ -719,6 +699,7 @@ function OdometerReadingForm({
             </ThemedText>
           ) : null}
         </ScrollView>
+        <DetailOverlayHeader title="Odometer reading" leading={{ label: 'Cancel', onPress: onCancel }} trailing={{ label: 'Save', disabled: !valid || saving, onPress: () => void save() }} />
     </ThemedView>
   );
 }
@@ -789,18 +770,7 @@ function VehicleForm({
 
   return (
     <ThemedView collapsable={false} style={styles.screen}>
-        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <View style={styles.formNavigation}>
-            <Pressable accessibilityRole="button" onPress={onCancel}>
-              <ThemedText style={styles.navigationAction}>Cancel</ThemedText>
-            </Pressable>
-            <ThemedText accessibilityRole="header" style={styles.formTitle}>
-              Add vehicle
-            </ThemedText>
-            <Pressable accessibilityRole="button" disabled={Boolean(validation) || saving} onPress={save}>
-              <ThemedText style={[styles.navigationAction, (validation || saving) && styles.disabled]}>Save</ThemedText>
-            </Pressable>
-          </View>
+        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, styles.detailContent]} keyboardShouldPersistTaps="handled">
           <Pressable accessibilityRole="button" accessibilityLabel="Hero photo" accessibilityHint="Opens the photo library" onPress={() => void choosePhoto()} style={styles.photoPanel}>
             {photoUri ? (
               <Image source={{ uri: photoUri }} style={styles.photoPreview} accessibilityLabel="Selected hero photo" />
@@ -832,6 +802,7 @@ function VehicleForm({
             </ThemedText>
           )}
         </ScrollView>
+        <DetailOverlayHeader title="Add vehicle" leading={{ label: 'Cancel', onPress: onCancel }} trailing={{ label: 'Save', disabled: Boolean(validation) || saving, onPress: save }} />
     </ThemedView>
   );
 }
@@ -897,7 +868,8 @@ function formatDate(effectiveAt: string) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
-  content: { padding: Spacing.four, gap: Spacing.three },
+  content: { paddingVertical: Spacing.four, paddingHorizontal: Spacing.three, gap: Spacing.three },
+  detailContent: { paddingTop: detailHeaderContentInset },
   pageTitle: {
     color: TorqueColors.text,
     fontSize: 34,
@@ -1019,17 +991,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'space-between',
   },
-  formNavigation: {
-    minHeight: 44,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    columnGap: Spacing.two,
-    rowGap: Spacing.one,
-  },
-  formTitle: { color: TorqueColors.text, fontSize: 17, fontWeight: '700', flexShrink: 1, textAlign: 'center' },
-  navigationAction: { color: TorqueColors.primary, fontSize: 17 },
   photoPanel: {
     minHeight: 132,
     borderRadius: Spacing.three,

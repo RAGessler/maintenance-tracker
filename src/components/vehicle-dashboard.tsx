@@ -4,6 +4,7 @@ import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 
 import { QuickAddFab } from '@/components/quick-add';
+import { DetailOverlayHeader } from '@/components/detail-overlay-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Card, Chevron, MetaPill, SectionLabel, SeverityDot, toneOf } from '@/components/torque-ui';
@@ -68,18 +69,7 @@ export function VehicleDashboard({
   const dueTonePill = items.some((item) => item.due.state === 'due') ? styles.heroPillDue : styles.heroPillSoon;
   return (
     <ThemedView collapsable={false} style={styles.screen}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
-        <View style={styles.navigation}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Back to Garage" onPress={onBack} style={styles.backButton} hitSlop={8}>
-            <SymbolView name="chevron.left" tintColor={TorqueColors.primary} size={20} weight="semibold" />
-          </Pressable>
-          <ThemedText accessibilityRole="header" style={styles.navTitle} numberOfLines={1}>
-            {vehicle.nickname}
-          </ThemedText>
-          <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${vehicle.nickname}`} onPress={onEdit} style={styles.editButton} hitSlop={8}>
-            <ThemedText style={styles.navAction}>Edit</ThemedText>
-          </Pressable>
-        </View>
+      <ScrollView contentInsetAdjustmentBehavior="never" contentContainerStyle={styles.content}>
         <View style={styles.hero}>
           {vehicle.heroPhotoUri ? (
             <Image source={{ uri: vehicle.heroPhotoUri }} style={styles.heroImage} accessibilityLabel={`${vehicle.nickname} hero photo`} />
@@ -104,66 +94,69 @@ export function VehicleDashboard({
             ) : null}
           </View>
         </View>
-        {trackingState !== 'idle' ? <TrackingPanel state={trackingState} /> : null}
-        <Card style={styles.odometerCard}>
-          <View style={styles.odometerHead}>
-            <SectionLabel style={styles.odometerLabel}>Odometer</SectionLabel>
-            <Pressable accessibilityRole="button" accessibilityLabel="Update odometer" accessibilityHint="Opens the odometer reading form" onPress={onUpdateOdometer} hitSlop={8}>
-              <ThemedText style={styles.updateLink}>Update</ThemedText>
+        <View style={styles.body}>
+          {trackingState !== 'idle' ? <TrackingPanel state={trackingState} /> : null}
+          <Card style={styles.odometerCard}>
+            <View style={styles.odometerHead}>
+              <SectionLabel style={styles.odometerLabel}>Odometer</SectionLabel>
+              <Pressable accessibilityRole="button" accessibilityLabel="Update odometer" accessibilityHint="Opens the odometer reading form" onPress={onUpdateOdometer} hitSlop={8}>
+                <ThemedText style={styles.updateLink}>Update</ThemedText>
+              </Pressable>
+            </View>
+            <View style={styles.odometerValueRow}>
+              <ThemedText style={styles.odometerValue}>{formatMilliMiles(vehicle.currentOdometerMilliMiles, true)}</ThemedText>
+              <ThemedText style={styles.odometerUnit}>mi</ThemedText>
+              <MetaPill label="Estimated" tone="neutral" uppercase />
+            </View>
+            <ThemedText style={styles.baseline}>{baseline ? `Baseline ${formatMilliMiles(baseline.milliMiles, true)} mi · ${formatShortDate(baseline.effectiveAt)}` : 'No manual odometer reading yet'}</ThemedText>
+          </Card>
+          <View style={styles.maintenanceHead}>
+            <ThemedText accessibilityRole="header" style={styles.maintenanceTitle}>
+              Maintenance
+            </ThemedText>
+            <Pressable accessibilityRole="button" accessibilityLabel="View all due maintenance" onPress={() => router.navigate('/due' as Href)} hitSlop={8}>
+              <ThemedText style={styles.viewAll}>View all</ThemedText>
             </Pressable>
           </View>
-          <View style={styles.odometerValueRow}>
-            <ThemedText style={styles.odometerValue}>{formatMilliMiles(vehicle.currentOdometerMilliMiles, true)}</ThemedText>
-            <ThemedText style={styles.odometerUnit}>mi</ThemedText>
-            <MetaPill label="Estimated" tone="neutral" uppercase />
-          </View>
-          <ThemedText style={styles.baseline}>{baseline ? `Baseline ${formatMilliMiles(baseline.milliMiles, true)} mi · ${formatShortDate(baseline.effectiveAt)}` : 'No manual odometer reading yet'}</ThemedText>
-        </Card>
-        <View style={styles.maintenanceHead}>
-          <ThemedText accessibilityRole="header" style={styles.maintenanceTitle}>
-            Maintenance
-          </ThemedText>
-          <Pressable accessibilityRole="button" accessibilityLabel="View all due maintenance" onPress={() => router.navigate('/due' as Href)} hitSlop={8}>
-            <ThemedText style={styles.viewAll}>View all</ThemedText>
-          </Pressable>
+          {loading ? (
+            <ThemedText style={styles.muted}>Loading maintenance...</ThemedText>
+          ) : error ? (
+            <ThemedText accessibilityLiveRegion="polite" style={styles.error}>
+              {error}
+            </ThemedText>
+          ) : items.length === 0 ? (
+            <ThemedText style={styles.muted}>No maintenance schedules yet. Add one from Edit.</ThemedText>
+          ) : (
+            <Card>
+              {items.map((item, index) => {
+                const tone = dueTone[item.due.state];
+                const status = statusLine(item.due);
+                return (
+                  <Pressable
+                    key={item.schedule.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.schedule.serviceName}, ${status.prefix}${status.detail ? `, ${status.detail}` : ''}`}
+                    accessibilityHint="Opens this maintenance schedule"
+                    onPress={() => onOpenSchedule(item.schedule.id)}
+                    style={[styles.scheduleRow, index < items.length - 1 && styles.scheduleRowDivider]}
+                  >
+                    <SeverityDot tone={tone} />
+                    <View style={styles.scheduleText}>
+                      <ThemedText style={styles.scheduleName}>{item.schedule.serviceName}</ThemedText>
+                      <ThemedText style={[styles.scheduleStatus, { color: toneOf(tone).fg }, item.due.state === 'due' && styles.scheduleStatusDue]}>
+                        {status.prefix}
+                        {status.detail ? ` · ${status.detail}` : ''}
+                      </ThemedText>
+                    </View>
+                    <Chevron />
+                  </Pressable>
+                );
+              })}
+            </Card>
+          )}
         </View>
-        {loading ? (
-          <ThemedText style={styles.muted}>Loading maintenance...</ThemedText>
-        ) : error ? (
-          <ThemedText accessibilityLiveRegion="polite" style={styles.error}>
-            {error}
-          </ThemedText>
-        ) : items.length === 0 ? (
-          <ThemedText style={styles.muted}>No maintenance schedules yet. Add one from Edit.</ThemedText>
-        ) : (
-          <Card>
-            {items.map((item, index) => {
-              const tone = dueTone[item.due.state];
-              const status = statusLine(item.due);
-              return (
-                <Pressable
-                  key={item.schedule.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${item.schedule.serviceName}, ${status.prefix}${status.detail ? `, ${status.detail}` : ''}`}
-                  accessibilityHint="Opens this maintenance schedule"
-                  onPress={() => onOpenSchedule(item.schedule.id)}
-                  style={[styles.scheduleRow, index < items.length - 1 && styles.scheduleRowDivider]}
-                >
-                  <SeverityDot tone={tone} />
-                  <View style={styles.scheduleText}>
-                    <ThemedText style={styles.scheduleName}>{item.schedule.serviceName}</ThemedText>
-                    <ThemedText style={[styles.scheduleStatus, { color: toneOf(tone).fg }, item.due.state === 'due' && styles.scheduleStatusDue]}>
-                      {status.prefix}
-                      {status.detail ? ` · ${status.detail}` : ''}
-                    </ThemedText>
-                  </View>
-                  <Chevron />
-                </Pressable>
-              );
-            })}
-          </Card>
-        )}
       </ScrollView>
+      <DetailOverlayHeader leading={{ label: 'Back', accessibilityLabel: 'Back to Garage', onPress: onBack }} trailing={{ label: 'Edit', accessibilityLabel: `Edit ${vehicle.nickname}`, onPress: onEdit }} />
       <QuickAddFab vehicles={[vehicle]} />
     </ThemedView>
   );
@@ -193,14 +186,10 @@ function formatShortDate(effectiveAt: string) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
-  content: { padding: Spacing.three, gap: Spacing.three },
-  navigation: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  backButton: { minWidth: 74, minHeight: 44, justifyContent: 'center' },
-  navTitle: { flex: 1, color: TorqueColors.text, fontSize: 17, fontWeight: '600', textAlign: 'center' },
-  editButton: { minWidth: 74, minHeight: 44, justifyContent: 'center', alignItems: 'flex-end' },
-  navAction: { color: TorqueColors.primary, fontSize: 17 },
-  hero: { borderRadius: 18, overflow: 'hidden', backgroundColor: TorqueColors.card },
-  heroImage: { width: '100%', height: 172 },
+  content: { paddingBottom: Spacing.three, gap: Spacing.three },
+  body: { paddingHorizontal: Spacing.three, gap: Spacing.three },
+  hero: { overflow: 'hidden', backgroundColor: TorqueColors.card },
+  heroImage: { width: '100%', height: 260 },
   heroFallback: { backgroundColor: TorqueColors.accentSurface, alignItems: 'center', justifyContent: 'center' },
   heroOverlay: {
     position: 'absolute',

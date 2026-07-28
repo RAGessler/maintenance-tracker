@@ -183,7 +183,7 @@ function Action({ label, onPress }: Readonly<{ label: string; onPress: () => voi
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
-  content: { gap: Spacing.three, padding: Spacing.four },
+  content: { gap: Spacing.three, paddingVertical: Spacing.four, paddingHorizontal: Spacing.three },
   header: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: Spacing.two },
   title: { color: TorqueColors.text, fontSize: 34, lineHeight: 41, fontWeight: '700' },
   headerSummary: { color: TorqueColors.secondary, fontSize: 13, marginBottom: Spacing.two },

@@ -81,7 +81,7 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
-  content: { padding: Spacing.four, gap: Spacing.three },
+  content: { paddingVertical: Spacing.four, paddingHorizontal: Spacing.three, gap: Spacing.three },
   title: { color: TorqueColors.text, fontSize: 34, lineHeight: 41, fontWeight: '700' },
   row: { flexDirection: 'row', gap: Spacing.three, padding: Spacing.three, alignItems: 'flex-start' },
   rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider },

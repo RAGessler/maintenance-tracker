@@ -4,6 +4,7 @@ import { Alert, AppState, Modal, Pressable, ScrollView, StyleSheet, TextInput, V
 import { type SymbolViewProps } from 'expo-symbols';
 
 import { QuickAddFab } from '@/components/quick-add';
+import { DetailOverlayHeader, detailHeaderContentInset } from '@/components/detail-overlay-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Card, Chevron, IconTile, SectionLabel, type Tone } from '@/components/torque-ui';
@@ -244,16 +245,7 @@ function TripReview({
   };
   return (
     <ThemedView collapsable={false} style={styles.screen}>
-        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
-          <View style={styles.navigation}>
-            <Pressable accessibilityRole="button" onPress={onCancel}>
-              <ThemedText type="linkPrimary">Cancel</ThemedText>
-            </Pressable>
-            <ThemedText accessibilityRole="header" style={styles.sectionTitle}>
-              Review trip
-            </ThemedText>
-            <View />
-          </View>
+        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, styles.detailContent]}>
           <TripCard trip={trip} vehicleName={vehicleName(vehicles, trip.vehicleId)} />
           {actions.length > 0 ? (
             <>
@@ -315,6 +307,7 @@ function TripReview({
             ))
           )}
         </ScrollView>
+        <DetailOverlayHeader title="Review trip" leading={{ label: 'Cancel', onPress: onCancel }} />
     </ThemedView>
   );
 }
@@ -552,18 +545,7 @@ function MaintenanceForm({
   };
   return (
     <ThemedView collapsable={false} style={styles.screen}>
-        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
-          <View style={styles.navigation}>
-            <Pressable accessibilityRole="button" onPress={onCancel}>
-              <ThemedText type="linkPrimary">Cancel</ThemedText>
-            </Pressable>
-            <ThemedText accessibilityRole="header" style={styles.sectionTitle}>
-              {record ? 'Edit maintenance' : 'Add maintenance'}
-            </ThemedText>
-            <Pressable accessibilityRole="button" disabled={!valid || saving} onPress={() => void save()}>
-              <ThemedText type="linkPrimary">Save</ThemedText>
-            </Pressable>
-          </View>
+        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, styles.detailContent]}>
           <View style={styles.form}>
             <Field label="Service" value={draft.serviceName} onChangeText={(serviceName) => setDraft({ ...draft, serviceName })} />
             <Field label="Completed date (YYYY-MM-DD)" value={draft.completedOn} onChangeText={(completedOn) => setDraft({ ...draft, completedOn })} />
@@ -576,6 +558,7 @@ function MaintenanceForm({
             </ThemedText>
           ) : null}
         </ScrollView>
+        <DetailOverlayHeader title={record ? 'Edit maintenance' : 'Add maintenance'} leading={{ label: 'Cancel', onPress: onCancel }} trailing={{ label: 'Save', disabled: !valid || saving, onPress: () => void save() }} />
     </ThemedView>
   );
 }
@@ -609,7 +592,8 @@ function formatShortDate(ms: number, utc: boolean) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
-  content: { padding: Spacing.four, gap: Spacing.three },
+  content: { paddingVertical: Spacing.four, paddingHorizontal: Spacing.three, gap: Spacing.three },
+  detailContent: { paddingTop: detailHeaderContentInset },
   title: {
     color: TorqueColors.text,
     fontSize: 34,
@@ -696,15 +680,6 @@ const styles = StyleSheet.create({
   },
   actionText: { color: '#FFFFFF', fontWeight: '700' },
   disabled: { opacity: 0.45 },
-  navigation: {
-    minHeight: 44,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    columnGap: Spacing.two,
-    rowGap: Spacing.one,
-  },
   form: {
     borderRadius: 16,
     backgroundColor: TorqueColors.card,
