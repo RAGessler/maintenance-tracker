@@ -16,23 +16,30 @@ export function DetailOverlayHeader({
   title,
   leading,
   trailing,
+  overlay = true,
+  showDismissIndicator = false,
 }: Readonly<{
   title?: string;
-  leading: DetailHeaderAction;
+  leading?: DetailHeaderAction;
   trailing?: DetailHeaderAction;
+  overlay?: boolean;
+  showDismissIndicator?: boolean;
 }>) {
   const insets = useSafeAreaInsets();
   return (
-    <View pointerEvents="box-none" style={[styles.header, { paddingTop: insets.top + Spacing.two }]}>
-      <HeaderAction action={leading} back={leading.label === 'Back'} />
-      {title ? (
-        <ThemedText accessibilityRole="header" numberOfLines={1} style={styles.title}>
-          {title}
-        </ThemedText>
-      ) : (
-        <View style={styles.title} />
-      )}
-      {trailing ? <HeaderAction action={trailing} /> : <View style={styles.trailingPlaceholder} />}
+    <View pointerEvents="box-none" style={[styles.header, !overlay && styles.inSheetHeader, { paddingTop: overlay ? insets.top + Spacing.two : Spacing.two }]}>
+      {showDismissIndicator ? <View accessibilityElementsHidden style={styles.dismissIndicator} /> : null}
+      <View style={styles.row}>
+        {leading ? <HeaderAction action={leading} back={leading.label === 'Back'} /> : <View style={styles.leadingPlaceholder} />}
+        {title ? (
+          <ThemedText accessibilityRole="header" numberOfLines={1} style={styles.title}>
+            {title}
+          </ThemedText>
+        ) : (
+          <View style={styles.title} />
+        )}
+        {trailing ? <HeaderAction action={trailing} /> : <View style={styles.trailingPlaceholder} />}
+      </View>
     </View>
   );
 }
@@ -65,11 +72,16 @@ const styles = StyleSheet.create({
     right: 0,
     minHeight: 44,
     paddingHorizontal: Spacing.three,
+  },
+  row: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.two,
   },
+  inSheetHeader: { position: 'relative' },
+  dismissIndicator: { alignSelf: 'center', width: 36, height: 5, borderRadius: 3, backgroundColor: TorqueColors.secondary, opacity: 0.35, marginBottom: Spacing.one },
   action: {
     minWidth: 44,
     minHeight: 44,
@@ -84,5 +96,6 @@ const styles = StyleSheet.create({
   actionLabel: { color: TorqueColors.primary, fontSize: 16, fontWeight: '600' },
   actionPressed: { opacity: 0.55 },
   title: { flex: 1, color: TorqueColors.text, fontSize: 17, fontWeight: '700', textAlign: 'center' },
+  leadingPlaceholder: { width: 44, minHeight: 44 },
   trailingPlaceholder: { width: 44, minHeight: 44 },
 });

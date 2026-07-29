@@ -3,6 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { QuickAddFab } from '@/components/quick-add';
+import { PrimaryTabHeader, usePrimaryTabHeaderContentInset } from '@/components/primary-tab-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Card, Chevron, ProgressBar, SeverityDot, toneOf } from '@/components/torque-ui';
@@ -16,6 +17,7 @@ type DueItem = Readonly<{ schedule: MaintenanceSchedule; due: DueCalculation }>;
 type VehicleDue = Readonly<{ vehicle: GarageVehicle; items: DueItem[]; dueCount: number; soonCount: number }>;
 
 export default function DueScreen() {
+  const primaryHeaderInset = usePrimaryTabHeaderContentInset();
   const [vehicles, setVehicles] = useState<GarageVehicle[]>([]);
   const [groups, setGroups] = useState<VehicleDue[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -74,17 +76,12 @@ export default function DueScreen() {
 
   return (
     <ThemedView collapsable={false} style={styles.screen}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
-        <View style={styles.header}>
-          <ThemedText accessibilityRole="header" style={styles.title}>
-            Due
+      <ScrollView contentInsetAdjustmentBehavior="never" contentContainerStyle={[styles.content, { paddingTop: primaryHeaderInset }]} scrollIndicatorInsets={{ top: primaryHeaderInset }}>
+        {groups.length > 0 ? (
+          <ThemedText style={styles.headerSummary}>
+            {totals.due} due · {totals.soon} soon
           </ThemedText>
-          {groups.length > 0 ? (
-            <ThemedText style={styles.headerSummary}>
-              {totals.due} due · {totals.soon} soon
-            </ThemedText>
-          ) : null}
-        </View>
+        ) : null}
         {loading ? (
           <ThemedText style={styles.muted}>Updating due status...</ThemedText>
         ) : error ? (
@@ -114,6 +111,7 @@ export default function DueScreen() {
           </>
         )}
       </ScrollView>
+      <PrimaryTabHeader title="Due" />
       <QuickAddFab vehicles={vehicles} />
     </ThemedView>
   );
@@ -184,9 +182,7 @@ function Action({ label, onPress }: Readonly<{ label: string; onPress: () => voi
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
   content: { gap: Spacing.three, paddingVertical: Spacing.four, paddingHorizontal: Spacing.three },
-  header: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: Spacing.two },
-  title: { color: TorqueColors.text, fontSize: 34, lineHeight: 41, fontWeight: '700' },
-  headerSummary: { color: TorqueColors.secondary, fontSize: 13, marginBottom: Spacing.two },
+  headerSummary: { color: TorqueColors.secondary, fontSize: 13 },
   group: { gap: Spacing.two },
   vehicleHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingHorizontal: Spacing.one },
   thumb: { width: 36, height: 36, borderRadius: 9, overflow: 'hidden', backgroundColor: TorqueColors.accentSurface },

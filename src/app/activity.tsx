@@ -5,6 +5,7 @@ import { type SymbolViewProps } from 'expo-symbols';
 
 import { QuickAddFab } from '@/components/quick-add';
 import { DetailOverlayHeader, detailHeaderContentInset } from '@/components/detail-overlay-header';
+import { PrimaryTabHeader, usePrimaryTabHeaderContentInset } from '@/components/primary-tab-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Card, Chevron, IconTile, SectionLabel, type Tone } from '@/components/torque-ui';
@@ -37,6 +38,7 @@ const emptyDraft: Draft = {
 };
 
 export default function ActivityScreen() {
+  const primaryHeaderInset = usePrimaryTabHeaderContentInset();
   const { quickAdd } = useLocalSearchParams<{ quickAdd?: string }>();
   const [vehicles, setVehicles] = useState<GarageVehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>();
@@ -127,10 +129,7 @@ export default function ActivityScreen() {
   return (
     <>
       <ThemedView collapsable={false} style={styles.screen}>
-          <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
-            <ThemedText accessibilityRole="header" style={styles.title}>
-              Activity
-            </ThemedText>
+          <ScrollView contentInsetAdjustmentBehavior="never" contentContainerStyle={[styles.content, { paddingTop: primaryHeaderInset }]} scrollIndicatorInsets={{ top: primaryHeaderInset }}>
             {loading ? (
               <ThemedText style={styles.muted}>Loading activity...</ThemedText>
             ) : error ? (
@@ -177,10 +176,11 @@ export default function ActivityScreen() {
               </>
             )}
           </ScrollView>
+          <PrimaryTabHeader title="Activity" />
           <QuickAddFab vehicles={vehicles} />
       </ThemedView>
       {reviewing ? (
-        <Modal visible presentationStyle="pageSheet" onRequestClose={() => setReviewing(null)}>
+        <Modal visible presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={() => setReviewing(null)}>
           <TripReview
             trip={reviewing}
             vehicles={vehicles}
@@ -245,7 +245,8 @@ function TripReview({
   };
   return (
     <ThemedView collapsable={false} style={styles.screen}>
-        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, styles.detailContent]}>
+        <DetailOverlayHeader title="Review trip" overlay={false} showDismissIndicator />
+        <ScrollView contentInsetAdjustmentBehavior="never" contentContainerStyle={styles.content}>
           <TripCard trip={trip} vehicleName={vehicleName(vehicles, trip.vehicleId)} />
           {actions.length > 0 ? (
             <>
@@ -307,7 +308,6 @@ function TripReview({
             ))
           )}
         </ScrollView>
-        <DetailOverlayHeader title="Review trip" leading={{ label: 'Cancel', onPress: onCancel }} />
     </ThemedView>
   );
 }
@@ -594,12 +594,6 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
   content: { paddingVertical: Spacing.four, paddingHorizontal: Spacing.three, gap: Spacing.three },
   detailContent: { paddingTop: detailHeaderContentInset },
-  title: {
-    color: TorqueColors.text,
-    fontSize: 34,
-    lineHeight: 41,
-    fontWeight: '700',
-  },
   section: { gap: Spacing.two },
   sectionHeader: {
     flexDirection: 'row',

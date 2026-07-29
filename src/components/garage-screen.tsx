@@ -6,6 +6,7 @@ import { SymbolView } from 'expo-symbols';
 
 import { QuickAddFab } from '@/components/quick-add';
 import { DetailOverlayHeader, detailHeaderContentInset } from '@/components/detail-overlay-header';
+import { PrimaryTabHeader, usePrimaryTabHeaderContentInset } from '@/components/primary-tab-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Card, Chevron, MetaPill, SectionLabel, type Tone } from '@/components/torque-ui';
@@ -35,6 +36,7 @@ const emptyDraft: Draft = {
 };
 
 export function GarageScreen() {
+  const primaryHeaderInset = usePrimaryTabHeaderContentInset();
   const { vehicleId, scheduleId, quickAdd } = useLocalSearchParams<{
     vehicleId?: string;
     scheduleId?: string;
@@ -148,10 +150,7 @@ export function GarageScreen() {
 
   return (
     <ThemedView collapsable={false} style={styles.screen}>
-        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
-          <ThemedText accessibilityRole="header" style={styles.pageTitle}>
-            Garage
-          </ThemedText>
+        <ScrollView contentInsetAdjustmentBehavior="never" contentContainerStyle={[styles.content, { paddingTop: primaryHeaderInset }]} scrollIndicatorInsets={{ top: primaryHeaderInset }}>
           {loading ? (
             <ThemedText>Loading vehicles...</ThemedText>
           ) : loadError ? (
@@ -178,6 +177,7 @@ export function GarageScreen() {
             </>
           )}
         </ScrollView>
+        <PrimaryTabHeader title="Garage" />
         <QuickAddFab vehicles={vehicles} />
     </ThemedView>
   );
@@ -870,12 +870,6 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
   content: { paddingVertical: Spacing.four, paddingHorizontal: Spacing.three, gap: Spacing.three },
   detailContent: { paddingTop: detailHeaderContentInset },
-  pageTitle: {
-    color: TorqueColors.text,
-    fontSize: 34,
-    lineHeight: 41,
-    fontWeight: '700',
-  },
   empty: {
     flex: 1,
     justifyContent: 'center',
