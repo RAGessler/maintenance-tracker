@@ -1,4 +1,5 @@
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { Platform } from 'react-native';
 
 import { TorqueColors } from '@/constants/theme';
 
@@ -7,22 +8,22 @@ export default function AppTabs() {
     <NativeTabs
       indicatorColor={TorqueColors.primary}
       labelStyle={{ selected: { color: TorqueColors.primary } }}>
-      <NativeTabs.Trigger name="index">
+      <NativeTabs.Trigger name="index" disableAutomaticContentInsets={Platform.OS === 'ios'}>
         <NativeTabs.Trigger.Label>Garage</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={{ default: 'car', selected: 'car.fill' }} src={require('@/assets/images/tabIcons/home.png')} renderingMode="template" />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="activity">
+      <NativeTabs.Trigger name="activity" disableAutomaticContentInsets={Platform.OS === 'ios'}>
         <NativeTabs.Trigger.Label>Activity</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={{ default: 'waveform.path.ecg', selected: 'waveform.path.ecg' }} src={require('@/assets/images/tabIcons/explore.png')} renderingMode="template" />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="due">
+      <NativeTabs.Trigger name="due" disableAutomaticContentInsets={Platform.OS === 'ios'}>
         <NativeTabs.Trigger.Label>Due</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={{ default: 'wrench.and.screwdriver', selected: 'wrench.and.screwdriver.fill' }} src={require('@/assets/images/tabIcons/explore.png')} renderingMode="template" />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="settings">
+      <NativeTabs.Trigger name="settings" disableAutomaticContentInsets={Platform.OS === 'ios'}>
         <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={{ default: 'slider.horizontal.3', selected: 'slider.horizontal.3' }} src={require('@/assets/images/tabIcons/explore.png')} renderingMode="template" />
       </NativeTabs.Trigger>

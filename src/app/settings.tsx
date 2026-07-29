@@ -4,11 +4,13 @@ import { useFocusEffect } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { PrimaryTabHeader, usePrimaryTabHeaderContentInset } from '@/components/primary-tab-header';
 import { Card, IconTile, SectionLabel } from '@/components/torque-ui';
 import { Spacing, TorqueColors } from '@/constants/theme';
 import { maintenanceStore, type LocationPermissionStatus } from '../../modules/maintenance-store';
 
 export default function SettingsScreen() {
+  const primaryHeaderInset = usePrimaryTabHeaderContentInset();
   const [locationStatus, setLocationStatus] = useState<LocationPermissionStatus>('unavailable');
   const [locationError, setLocationError] = useState<string | null>(null);
 
@@ -47,10 +49,7 @@ export default function SettingsScreen() {
 
   return (
     <ThemedView collapsable={false} style={styles.screen}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
-        <ThemedText accessibilityRole="header" style={styles.title}>
-          Settings
-        </ThemedText>
+      <ScrollView contentInsetAdjustmentBehavior="never" contentContainerStyle={[styles.content, { paddingTop: primaryHeaderInset }]} scrollIndicatorInsets={{ top: primaryHeaderInset }}>
         <SectionLabel>Local data &amp; privacy</SectionLabel>
         <Card>
           <View style={[styles.row, styles.rowDivider]}>
@@ -75,6 +74,7 @@ export default function SettingsScreen() {
           </View>
         </Card>
       </ScrollView>
+      <PrimaryTabHeader title="Settings" />
     </ThemedView>
   );
 }
@@ -82,7 +82,6 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
   content: { paddingVertical: Spacing.four, paddingHorizontal: Spacing.three, gap: Spacing.three },
-  title: { color: TorqueColors.text, fontSize: 34, lineHeight: 41, fontWeight: '700' },
   row: { flexDirection: 'row', gap: Spacing.three, padding: Spacing.three, alignItems: 'flex-start' },
   rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: TorqueColors.divider },
   rowText: { flex: 1, gap: 3 },
