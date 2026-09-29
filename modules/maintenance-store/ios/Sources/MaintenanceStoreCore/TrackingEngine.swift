@@ -65,11 +65,17 @@ public struct TrackingFinalization: Equatable, Sendable {
 }
 
 public protocol TrackingSessionRepository: AnyObject {
+  /// Serializes one complete tracking event, including every repository read and its resulting write.
+  func withTrackingTransition<T>(_ body: () throws -> T) throws -> T
   func beginAutomatic(vehicleID: Int64, now: Int64) throws -> TrackingSession
   func session() throws -> TrackingSession?
   func save(_ session: TrackingSession) throws
   /// Must atomically create the trip, its state/revision, and clear precise session anchors.
   func finalize(_ finalization: TrackingFinalization, session: TrackingSession, now: Int64) throws
+}
+
+public extension TrackingSessionRepository {
+  func withTrackingTransition<T>(_ body: () throws -> T) throws -> T { try body() }
 }
 
 /// Deterministic lifecycle policy. Platform adapters supply only delivered events and aggregate fixes.
@@ -79,51 +85,77 @@ public final class TrackingEngine {
 
   public init(repository: TrackingSessionRepository) { self.repository = repository }
 
-  public func startAutomatic(vehicleID: Int64, now: Int64) throws { _ = try repository.beginAutomatic(vehicleID: vehicleID, now: now) }
+  public func startAutomatic(vehicleID: Int64, now: Int64) throws {
+    try repository.withTrackingTransition { _ = try repository.beginAutomatic(vehicleID: vehicleID, now: now) }
+  }
 
   public func receive(route: RouteEvidence, now: Int64) throws {
-    try tick(now: now)
-    guard var session = try repository.session() else { return }
-    switch route {
-    case .matching:
-      session.routeEvidence = .matching
-      if session.state == .recovering { session.state = session.movementObserved ? .active : .awaitingMovement; session.reconnectDeadline = nil }
-      try repository.save(session)
-    case .unknown: try finish(session, completion: .notCompleted, reason: .unknownRoute, now: now)
-    case .conflicting: try finish(session, completion: .notCompleted, reason: .conflictingRoute, now: now)
+    try repository.withTrackingTransition {
+      try tickInTransition(now: now)
+      guard var session = try repository.session() else { return }
+      switch route {
+      case .matching:
+        session.routeEvidence = .matching
+        if session.state == .recovering { session.state = session.movementObserved ? .active : .awaitingMovement; session.reconnectDeadline = nil }
+        try repository.save(session)
+      case .unknown: try finish(session, completion: .notCompleted, reason: .unknownRoute, now: now)
+      case .conflicting: try finish(session, completion: .notCompleted, reason: .conflictingRoute, now: now)
+      }
     }
   }
 
   public func receive(location: TrackingLocation, now: Int64) throws {
-    try tick(now: now)
-    guard var session = try repository.session(), session.state != .recovering else { return }
-    session.cumulativeMilliMiles += max(0, location.distanceMilliMiles)
-    if !session.movementObserved && (location.speedMetersPerSecond >= 3 || location.displacementMeters >= 100) {
-      session.movementObserved = true
-      session.movementDeadline = nil
-      session.state = .active
+    try repository.withTrackingTransition {
+      try tickInTransition(now: now)
+      guard var session = try repository.session(), session.state != .recovering else { return }
+      guard location.timestamp >= session.startedAt,
+            location.distanceMilliMiles >= 0,
+            location.speedMetersPerSecond.isFinite, location.speedMetersPerSecond >= 0,
+            location.displacementMeters.isFinite, location.displacementMeters >= 0 else { return }
+      if !session.movementObserved && (location.speedMetersPerSecond >= 3 || location.displacementMeters >= 100) {
+        session.movementObserved = true
+        session.movementDeadline = nil
+        session.state = .active
+      }
+      if session.movementObserved {
+        let (distance, overflow) = session.cumulativeMilliMiles.addingReportingOverflow(location.distanceMilliMiles)
+        guard !overflow else { return }
+        session.cumulativeMilliMiles = distance
+      }
+      try repository.save(session)
     }
-    try repository.save(session)
   }
 
   public func routeLost(now: Int64, carPlayActive: Bool) throws {
-    try tick(now: now)
-    guard var session = try repository.session() else { return }
-    // Wireless Bluetooth loss during an active CarPlay route is a transport handoff, not an end candidate.
-    guard !carPlayActive else { return }
-    session.state = .recovering
-    session.reconnectDeadline = now + Self.reconnectWindowMilliseconds
-    try repository.save(session)
+    try repository.withTrackingTransition {
+      try tickInTransition(now: now)
+      guard var session = try repository.session() else { return }
+      // Wireless Bluetooth loss during an active CarPlay route is a transport handoff, not an end candidate.
+      guard !carPlayActive else { return }
+      session.state = .recovering
+      let (deadline, overflow) = now.addingReportingOverflow(Self.reconnectWindowMilliseconds)
+      guard !overflow else { return }
+      session.reconnectDeadline = deadline
+      try repository.save(session)
+    }
   }
 
   public func end(vehicleID: Int64, now: Int64) throws {
-    try tick(now: now)
-    guard let session = try repository.session() else { return }
-    guard session.vehicleID == vehicleID else { throw TrackingEngineError.wrongVehicle }
-    try finish(session, completion: .explicitEnd, reason: nil, now: now)
+    try repository.withTrackingTransition {
+      guard let initialSession = try repository.session() else { return }
+      guard initialSession.vehicleID == vehicleID else { throw TrackingEngineError.wrongVehicle }
+      try tickInTransition(now: now)
+      guard let session = try repository.session() else { return }
+      guard session.vehicleID == vehicleID else { throw TrackingEngineError.wrongVehicle }
+      try finish(session, completion: .explicitEnd, reason: nil, now: now)
+    }
   }
 
   public func tick(now: Int64) throws {
+    try repository.withTrackingTransition { try tickInTransition(now: now) }
+  }
+
+  private func tickInTransition(now: Int64) throws {
     guard let session = try repository.session() else { return }
     if now >= session.maximumDurationDeadline { try finish(session, completion: .notCompleted, reason: .maximumDurationExceeded, now: now) }
     else if let deadline = session.movementDeadline, now >= deadline { try finish(session, completion: .notCompleted, reason: .movementNotConfirmed, now: now) }
@@ -131,24 +163,34 @@ public final class TrackingEngine {
   }
 
   public func locationFailed(now: Int64) throws {
-    guard let session = try repository.session() else { return }
-    try finish(session, completion: .notCompleted, reason: .locationFailed, now: now)
+    try repository.withTrackingTransition {
+      guard let session = try repository.session() else { return }
+      try finish(session, completion: .notCompleted, reason: .locationFailed, now: now)
+    }
   }
 
   public func restorationFailed(now: Int64) throws {
-    guard let session = try repository.session() else { return }
-    try finish(session, completion: .notCompleted, reason: .restorationFailed, now: now)
+    try repository.withTrackingTransition {
+      guard let session = try repository.session() else { return }
+      try finish(session, completion: .notCompleted, reason: .restorationFailed, now: now)
+    }
   }
 
   public func permissionLost(now: Int64) throws {
-    guard let session = try repository.session() else { return }
-    try finish(session, completion: .notCompleted, reason: .locationPermissionLost, now: now)
+    try repository.withTrackingTransition {
+      guard let session = try repository.session() else { return }
+      try finish(session, completion: .notCompleted, reason: .locationPermissionLost, now: now)
+    }
   }
 
   private func finish(_ session: TrackingSession, completion: TrackingCompletion, reason: TrackingFailure?, now: Int64) throws {
-    let automaticConfirmed = session.source == .automatic && session.movementObserved && session.cumulativeMilliMiles > 0 && completion == .explicitEnd && reason == nil
-    let manualConfirmed = session.source == .manual && session.movementObserved && session.cumulativeMilliMiles > 0 && reason == nil
-    let fallbackReason: TrackingFailure? = reason ?? (!session.movementObserved ? .movementNotConfirmed : nil)
+    let usableDistance = session.movementObserved && session.cumulativeMilliMiles > 0
+    let automaticCompletion = completion == .explicitEnd || completion == .routeLossAfterGrace
+    let automaticConfirmed = session.source == .automatic && session.routeEvidence == .matching && usableDistance && automaticCompletion && reason == nil
+    let manualConfirmed = session.source == .manual && usableDistance && completion == .explicitEnd && reason == nil
+    let fallbackReason: TrackingFailure? = reason
+      ?? (!session.movementObserved ? .movementNotConfirmed : nil)
+      ?? (session.source == .automatic && session.routeEvidence != .matching ? .routeNotCorroborated : nil)
     try repository.finalize(TrackingFinalization(disposition: automaticConfirmed || manualConfirmed ? .confirmed : .reviewRequired, completion: completion, reason: fallbackReason, distanceMilliMiles: session.cumulativeMilliMiles), session: session, now: now)
   }
 }

@@ -202,9 +202,9 @@ public class MaintenanceStoreModule: Module {
       ))
     }
 
-    AsyncFunction("getTrackingSnapshot") { () throws -> [String: String] in
-      Task { @MainActor in
-        MaintenanceTrackingRuntime.shared.resume(now: Self.now())
+    AsyncFunction("getTrackingSnapshot") { () async throws -> [String: String] in
+      try await MainActor.run {
+        try MaintenanceTrackingRuntime.shared.resume(now: Self.now())
       }
       return ["state": try self.localStore().trackingState()]
     }
@@ -227,14 +227,22 @@ public class MaintenanceStoreModule: Module {
       }
     }
 
-    AsyncFunction("startTracking") { (vehicleId: String, source: String) throws -> [String: String] in
+    AsyncFunction("startTracking") { (vehicleId: String, source: String) async throws -> [String: String] in
       guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidVehicle }
-      try self.localStore().startTracking(vehicleId: nativeVehicleId, source: source, now: Self.now())
+      try await Task { @MainActor in
+        switch source {
+        case "automatic": try MaintenanceTrackingRuntime.shared.startAutomatic(vehicleID: nativeVehicleId, now: Self.now())
+        case "manual": try await MaintenanceTrackingRuntime.shared.startManual(vehicleID: nativeVehicleId, now: Self.now())
+        default: throw LocalStoreError.sqlite("Unsupported tracking source")
+        }
+      }.value
       return ["state": try self.localStore().trackingState()]
     }
 
-    AsyncFunction("stopTracking") { () throws -> [String: String] in
-      try self.localStore().stopTracking(now: Self.now())
+    AsyncFunction("stopTracking") { () async throws -> [String: String] in
+      try await MainActor.run {
+        try MaintenanceTrackingRuntime.shared.stop(now: Self.now())
+      }
       return ["state": "idle"]
     }
 
