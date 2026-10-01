@@ -114,13 +114,25 @@ public struct StoreBootstrap: Sendable, Equatable {
 
 public struct StoredTrackingSetup: Sendable, Equatable {
   public let vehicleId: Int64
-  public let state: String
   public let locationReady: Bool
+  public var shortcutsReady = false
+  public var automationsReady = false
+  public var checklistConfirmed = false
+  public var routeReady = false
+  public var testReady = false
+  public var setupID: Int64?
+  public var transport: SetupTransport?
+  public var testState = "idle"
+  public var testFailure: String?
+
+  public var state: String {
+    locationReady && shortcutsReady && automationsReady && checklistConfirmed && routeReady && testReady ? "ready" : "incomplete"
+  }
 }
 
 /// The only owner of SQLite connections and durable product writes.
 public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
-  public static let currentSchemaVersion = 2
+  public static let currentSchemaVersion = 3
 
   private var database: OpaquePointer?
   private var transactionDepth = 0
@@ -497,13 +509,29 @@ public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
     }
   }
 
-  public func trackingSetup(for vehicleId: Int64, locationReady: Bool = false) throws -> StoredTrackingSetup {
+  public func trackingSetup(for vehicleId: Int64, locationReady: Bool = false, now: Int64? = nil) throws -> StoredTrackingSetup {
     try withTrackingTransition {
       guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
         throw LocalStoreError.invalidVehicle
       }
-      let isReady = try locationReady && automaticSetupIsReady(vehicleId: vehicleId)
-      return StoredTrackingSetup(vehicleId: vehicleId, state: isReady ? "ready" : "incomplete", locationReady: locationReady)
+      if let now { try expireSetupTest(now: now) }
+      var setup = StoredTrackingSetup(vehicleId: vehicleId, locationReady: locationReady)
+      if let configuration = try setupConfiguration(for: vehicleId) {
+        setup.setupID = configuration.id
+        setup.transport = configuration.transport
+        setup.shortcutsReady = configuration.shortcutsReady
+        setup.automationsReady = configuration.automationsReady
+        setup.checklistConfirmed = configuration.checklistConfirmed
+        setup.testReady = configuration.tested
+        setup.routeReady = try scalarInt64("SELECT COUNT(*) FROM route_binding WHERE vehicle_id = ? AND kind = ?",
+          [.integer(vehicleId), .text(configuration.transport.routeKind)]) > 0
+        setup.testState = configuration.tested ? "passed" : "idle"
+      }
+      if let test = try queryOne("SELECT start_received, ended, failure, configuration_id FROM setup_test WHERE vehicle_id = ?", [.integer(vehicleId)]), test[3] == setup.setupID {
+        setup.testState = test[2] > 0 ? "failed" : test[1] > 0 ? "passed" : test[0] > 0 ? "waiting_end" : "waiting_start"
+        setup.testFailure = Self.setupTestFailure(test[2])?.code
+      }
+      return setup
     }
   }
 
@@ -541,6 +569,8 @@ public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
         "INSERT INTO trigger_configuration (vehicle_id, mode, setup_completed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(vehicle_id, mode) DO UPDATE SET setup_completed_at = excluded.setup_completed_at, updated_at = excluded.updated_at",
         [.integer(vehicleId), .text(mode), .integer(now), .integer(now), .integer(now)]
       )
+      try run("UPDATE trigger_configuration SET route_kind = ?, shortcuts_confirmed = 1, automations_confirmed = 1, checklist_confirmed = 1 WHERE vehicle_id = ? AND mode = ?",
+        [.text(mode == "wired_carplay_shortcut" ? "carplay_route" : "bluetooth_route"), .integer(vehicleId), .text(mode)])
     }
   }
 
@@ -590,6 +620,10 @@ public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
       try requireAcceptedDisclosure()
       guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else {
         throw LocalStoreError.sqlite("Vehicle is unavailable")
+      }
+      try expireSetupTest(now: now)
+      if try queryOne("SELECT id FROM setup_test WHERE ended = 0 AND failure = 0", []) != nil {
+        throw LocalStoreError.trackingConflict
       }
       if let activeVehicleId = try queryOne("SELECT intended_vehicle_id FROM tracking_session WHERE id = 1", [])?[0] {
         guard activeVehicleId == vehicleId else { throw LocalStoreError.trackingConflict }
@@ -875,6 +909,29 @@ public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
         try execute("ALTER TABLE maintenance_schedule ADD COLUMN source_template_version INTEGER CHECK(source_template_version > 0)")
         try execute("PRAGMA user_version = 2")
       }
+      if version <= 2 {
+        try execute("""
+          ALTER TABLE installation_state ADD COLUMN shortcut_namespace TEXT NOT NULL DEFAULT '';
+          UPDATE installation_state SET shortcut_namespace = lower(hex(randomblob(16))) WHERE id = 1;
+          ALTER TABLE trigger_configuration ADD COLUMN route_kind TEXT NOT NULL DEFAULT 'bluetooth_route' CHECK(route_kind IN ('bluetooth_route', 'carplay_route'));
+          ALTER TABLE trigger_configuration ADD COLUMN shortcuts_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(shortcuts_confirmed IN (0, 1));
+          ALTER TABLE trigger_configuration ADD COLUMN automations_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(automations_confirmed IN (0, 1));
+          ALTER TABLE trigger_configuration ADD COLUMN checklist_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(checklist_confirmed IN (0, 1));
+          UPDATE trigger_configuration SET route_kind = 'carplay_route' WHERE mode = 'wired_carplay_shortcut';
+          UPDATE trigger_configuration SET setup_completed_at = NULL, tested_at = NULL;
+          CREATE TABLE setup_test (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            vehicle_id INTEGER NOT NULL REFERENCES vehicle(id) ON DELETE CASCADE,
+            configuration_id INTEGER NOT NULL REFERENCES trigger_configuration(id) ON DELETE CASCADE,
+            armed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+            start_received INTEGER NOT NULL DEFAULT 0 CHECK(start_received IN (0, 1)),
+            route_matched INTEGER NOT NULL DEFAULT 0 CHECK(route_matched IN (0, 1)),
+            ended INTEGER NOT NULL DEFAULT 0 CHECK(ended IN (0, 1)),
+            failure INTEGER NOT NULL DEFAULT 0 CHECK(failure BETWEEN 0 AND 6)
+          );
+          PRAGMA user_version = 3;
+          """)
+      }
       try validateForeignKeys()
     }
   }
@@ -904,18 +961,7 @@ public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
   }
 
   private func automaticSetupIsReady(vehicleId: Int64) throws -> Bool {
-    try scalarInt64(
-      """
-      SELECT COUNT(*) FROM trigger_configuration AS configuration
-      WHERE configuration.vehicle_id = ? AND configuration.setup_completed_at IS NOT NULL AND configuration.tested_at IS NOT NULL
-        AND ((configuration.mode = 'bluetooth_shortcut' AND EXISTS (
-          SELECT 1 FROM route_binding WHERE vehicle_id = configuration.vehicle_id AND kind = 'bluetooth_route'
-        )) OR (configuration.mode = 'wired_carplay_shortcut' AND EXISTS (
-          SELECT 1 FROM route_binding WHERE vehicle_id = configuration.vehicle_id AND kind = 'carplay_route'
-        )))
-      """,
-      [.integer(vehicleId)]
-    ) > 0
+    try trackingSetup(for: vehicleId, locationReady: true).state == "ready"
   }
 
   private func uniqueTrackingStartTime(vehicleId: Int64, requestedAt: Int64) throws -> Int64 {
@@ -1138,6 +1184,220 @@ public final class LocalStore: @unchecked Sendable, TrackingSessionRepository {
 
   private func failure(_ database: OpaquePointer) -> LocalStoreError {
     LocalStoreError.sqlite(String(cString: sqlite3_errmsg(database)))
+  }
+}
+
+private struct SetupConfiguration {
+  let id: Int64
+  let transport: SetupTransport
+  let shortcutsReady: Bool
+  let automationsReady: Bool
+  let checklistConfirmed: Bool
+  let tested: Bool
+}
+
+extension LocalStore {
+  /// Installation-scoped immutable App Entity choices cannot alias row IDs after Delete All Data.
+  public func shortcutIdentifier(for vehicleId: Int64) throws -> String {
+    try withTrackingTransition {
+      guard try shortcutVehicles().contains(where: { $0.id == vehicleId }) else { throw LocalStoreError.invalidVehicle }
+      return try "\(shortcutNamespace()):\(vehicleId)"
+    }
+  }
+
+  public func shortcutVehicle(identifier: String) throws -> StoredVehicle? {
+    try withTrackingTransition {
+      let parts = identifier.split(separator: ":", omittingEmptySubsequences: false)
+      guard parts.count == 2, parts[0] == (try shortcutNamespace()), let id = Int64(parts[1]), id > 0 else { return nil }
+      return try shortcutVehicles().first { $0.id == id }
+    }
+  }
+
+  private func shortcutNamespace() throws -> String {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, "SELECT shortcut_namespace FROM installation_state WHERE id = 1", -1, &statement, nil) == SQLITE_OK, let statement else { throw failure(database) }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW, let value = sqlite3_column_text(statement, 0) else { throw failure(database) }
+    let namespace = String(cString: value)
+    guard !namespace.isEmpty else { throw LocalStoreError.sqlite("Shortcut identity is unavailable") }
+    return namespace
+  }
+
+  /// Each edit replaces the configuration identity, so stale screens cannot attest to new setup.
+  public func saveTrackingSetup(for vehicleId: Int64, transport: SetupTransport, expectedSetupID: Int64?,
+    shortcutsReady: Bool, automationsReady: Bool, checklistConfirmed: Bool,
+    replacingWiredVehicleID: Int64? = nil, now: Int64) throws -> StoredTrackingSetup {
+    try transaction {
+      try requireSetupEditable(vehicleId: vehicleId)
+      let previous = try setupConfiguration(for: vehicleId)
+      guard previous?.id == expectedSetupID else { throw TrackingSetupFailure.changed }
+      if transport == .wiredCarPlay,
+         let owner = try queryOne("SELECT vehicle_id FROM trigger_configuration WHERE mode = 'wired_carplay_shortcut' AND vehicle_id <> ?", [.integer(vehicleId)])?[0] {
+        guard replacingWiredVehicleID == owner else { throw TrackingSetupFailure.wiredAssignment(owner) }
+        try run("DELETE FROM trigger_configuration WHERE vehicle_id = ?", [.integer(owner)])
+        try run("DELETE FROM route_binding WHERE vehicle_id = ?", [.integer(owner)])
+      } else if replacingWiredVehicleID != nil {
+        throw TrackingSetupFailure.changed
+      }
+      // Reconfirming a repaired external Shortcut/automation also invalidates its previous test.
+      try run("DELETE FROM trigger_configuration WHERE vehicle_id = ?", [.integer(vehicleId)])
+      if previous?.transport != transport { try run("DELETE FROM route_binding WHERE vehicle_id = ?", [.integer(vehicleId)]) }
+      let complete = shortcutsReady && automationsReady && checklistConfirmed
+      try run("""
+        INSERT INTO trigger_configuration (vehicle_id, mode, route_kind, shortcuts_confirmed, automations_confirmed,
+          checklist_confirmed, setup_completed_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [.integer(vehicleId), .text(transport.mode), .text(transport.routeKind), .integer(shortcutsReady ? 1 : 0),
+          .integer(automationsReady ? 1 : 0), .integer(checklistConfirmed ? 1 : 0), complete ? .integer(now) : .null, .integer(now), .integer(now)])
+    }
+    return try trackingSetup(for: vehicleId)
+  }
+
+  public func bindSetupRoute(for vehicleId: Int64, setupID: Int64, route: TrackingRoute,
+    replacingVehicleID: Int64? = nil, now: Int64) throws {
+    try transaction {
+      try requireSetupEditable(vehicleId: vehicleId)
+      let configuration = try requireSetupConfiguration(vehicleId: vehicleId, setupID: setupID)
+      guard configuration.transport.routeKind == route.kind else { throw TrackingSetupFailure.wrongTransport }
+      let owner = try queryOne("SELECT vehicle_id FROM route_binding WHERE kind = ? AND opaque_value = ?", [.text(route.kind), .text(route.opaqueValue)])?[0]
+      if let owner, owner != vehicleId {
+        guard replacingVehicleID == owner else { throw TrackingSetupFailure.routeAssignment(owner) }
+        try run("DELETE FROM route_binding WHERE kind = ? AND opaque_value = ?", [.text(route.kind), .text(route.opaqueValue)])
+        try run("UPDATE trigger_configuration SET tested_at = NULL WHERE vehicle_id = ?", [.integer(owner)])
+        try run("DELETE FROM setup_test WHERE vehicle_id = ?", [.integer(owner)])
+      } else if replacingVehicleID != nil { throw TrackingSetupFailure.changed }
+      try run("DELETE FROM route_binding WHERE vehicle_id = ?", [.integer(vehicleId)])
+      try run("INSERT INTO route_binding (vehicle_id, kind, opaque_value, created_at) VALUES (?, ?, ?, ?)",
+        [.integer(vehicleId), .text(route.kind), .text(route.opaqueValue), .integer(now)])
+      try run("UPDATE trigger_configuration SET tested_at = NULL WHERE id = ?", [.integer(setupID)])
+      try run("DELETE FROM setup_test WHERE vehicle_id = ?", [.integer(vehicleId)])
+    }
+  }
+
+  public func armSetupTest(for vehicleId: Int64, setupID: Int64, locationReady: Bool, now: Int64) throws {
+    try transaction {
+      try requireSetupEditable(vehicleId: vehicleId)
+      _ = try requireSetupConfiguration(vehicleId: vehicleId, setupID: setupID)
+      guard locationReady else { throw TrackingSetupFailure.permissionRequired }
+      let setup = try trackingSetup(for: vehicleId, locationReady: locationReady)
+      guard setup.shortcutsReady && setup.automationsReady && setup.checklistConfirmed && setup.routeReady else {
+        throw TrackingSetupFailure.checklistIncomplete
+      }
+      try expireSetupTest(now: now)
+      if let pending = try queryOne("SELECT vehicle_id FROM setup_test WHERE ended = 0 AND failure = 0", []), pending[0] != vehicleId {
+        throw TrackingSetupFailure.busy
+      }
+      let (deadline, overflow) = now.addingReportingOverflow(600_000)
+      guard !overflow else { throw TrackingSetupFailure.expired }
+      try run("DELETE FROM setup_test", [])
+      try run("UPDATE trigger_configuration SET tested_at = NULL WHERE id = ?", [.integer(setupID)])
+      try run("INSERT INTO setup_test (id, vehicle_id, configuration_id, armed_at, expires_at) VALUES (1, ?, ?, ?, ?)",
+        [.integer(vehicleId), .integer(setupID), .integer(now), .integer(deadline)])
+    }
+  }
+
+  /// Intercepts real App Intent delivery only while a bounded setup test is armed. No trip or GPS session is created.
+  public func receiveSetupCommand(vehicleID: Int64, isStart: Bool, route: TrackingRoute?, locationReady: Bool, now: Int64) throws -> SetupCommandResult {
+    try withTrackingTransition {
+      guard let test = try queryOne("SELECT vehicle_id, configuration_id, armed_at, expires_at, start_received, route_matched, ended, failure FROM setup_test WHERE id = 1", []),
+            test[6] == 0, test[7] == 0 else { return .notTesting }
+      let rejection: TrackingSetupFailure?
+      if now < test[2] || now >= test[3] { rejection = .expired }
+      else if try session() != nil { rejection = .busy }
+      else if vehicleID != test[0] { rejection = .wrongVehicle }
+      else if !locationReady { rejection = .permissionRequired }
+      else if !isStart && test[4] == 0 { rejection = .endBeforeStart }
+      else if let route, try routeEvidence(for: vehicleID, kind: route.kind, opaqueValue: route.opaqueValue) != .matching { rejection = .routeMismatch }
+      else if !isStart && route == nil && test[5] == 0 { rejection = .routeMismatch }
+      else { rejection = nil }
+      if let rejection {
+        try run("UPDATE setup_test SET failure = ? WHERE id = 1", [.integer(Self.setupTestFailureCode(rejection))])
+        return .rejected(rejection)
+      }
+      let configuration = try requireSetupConfiguration(vehicleId: vehicleID, setupID: test[1])
+      guard configuration.shortcutsReady && configuration.automationsReady && configuration.checklistConfirmed else {
+        return .rejected(.changed)
+      }
+      if isStart {
+        try run("UPDATE setup_test SET start_received = 1, route_matched = MAX(route_matched, ?) WHERE id = 1", [.integer(route == nil ? 0 : 1)])
+      } else {
+        try run("UPDATE setup_test SET ended = 1, route_matched = 1 WHERE id = 1", [])
+        try run("UPDATE trigger_configuration SET tested_at = ?, updated_at = ? WHERE id = ?", [.integer(now), .integer(now), .integer(test[1])])
+      }
+      return .handled
+    }
+  }
+
+  public func cancelSetupTest(for vehicleId: Int64, setupID: Int64) throws {
+    try transaction {
+      _ = try requireSetupConfiguration(vehicleId: vehicleId, setupID: setupID)
+      try run("DELETE FROM setup_test WHERE vehicle_id = ? AND configuration_id = ?", [.integer(vehicleId), .integer(setupID)])
+    }
+  }
+
+  public func removeTrackingSetup(for vehicleId: Int64, setupID: Int64) throws {
+    try transaction {
+      try requireSetupEditable(vehicleId: vehicleId)
+      _ = try requireSetupConfiguration(vehicleId: vehicleId, setupID: setupID)
+      try run("DELETE FROM trigger_configuration WHERE vehicle_id = ?", [.integer(vehicleId)])
+      try run("DELETE FROM route_binding WHERE vehicle_id = ?", [.integer(vehicleId)])
+    }
+  }
+
+  private func requireSetupEditable(vehicleId: Int64) throws {
+    try requireAcceptedDisclosure()
+    guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else { throw LocalStoreError.invalidVehicle }
+    guard try session() == nil else { throw TrackingSetupFailure.busy }
+  }
+
+  private func requireSetupConfiguration(vehicleId: Int64, setupID: Int64) throws -> SetupConfiguration {
+    guard try queryOne("SELECT id FROM vehicle WHERE id = ? AND archived_at IS NULL", [.integer(vehicleId)]) != nil else { throw LocalStoreError.invalidVehicle }
+    guard let configuration = try setupConfiguration(for: vehicleId), configuration.id == setupID else { throw TrackingSetupFailure.changed }
+    return configuration
+  }
+
+  private func setupConfiguration(for vehicleId: Int64) throws -> SetupConfiguration? {
+    guard let database else { throw LocalStoreError.sqlite("Store is closed") }
+    var statement: OpaquePointer?
+    let sql = "SELECT id, mode, route_kind, shortcuts_confirmed, automations_confirmed, checklist_confirmed, tested_at IS NOT NULL FROM trigger_configuration WHERE vehicle_id = ? ORDER BY id DESC LIMIT 1"
+    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw failure(database) }
+    defer { sqlite3_finalize(statement) }
+    try bind([.integer(vehicleId)], to: statement)
+    let result = sqlite3_step(statement)
+    if result == SQLITE_DONE { return nil }
+    guard result == SQLITE_ROW, let mode = sqlite3_column_text(statement, 1), let kind = sqlite3_column_text(statement, 2) else { throw failure(database) }
+    let transport: SetupTransport = String(cString: mode) == "wired_carplay_shortcut" ? .wiredCarPlay : String(cString: kind) == "carplay_route" ? .wirelessCarPlay : .bluetooth
+    return SetupConfiguration(id: sqlite3_column_int64(statement, 0), transport: transport,
+      shortcutsReady: sqlite3_column_int64(statement, 3) == 1, automationsReady: sqlite3_column_int64(statement, 4) == 1,
+      checklistConfirmed: sqlite3_column_int64(statement, 5) == 1, tested: sqlite3_column_int64(statement, 6) == 1)
+  }
+
+  private func expireSetupTest(now: Int64) throws {
+    try run("UPDATE setup_test SET failure = 5 WHERE ended = 0 AND failure = 0 AND (armed_at > ? OR expires_at <= ?)", [.integer(now), .integer(now)])
+  }
+
+  private static func setupTestFailure(_ code: Int64) -> TrackingSetupFailure? {
+    switch code {
+    case 1: return .wrongVehicle
+    case 2: return .permissionRequired
+    case 3: return .routeMismatch
+    case 4: return .endBeforeStart
+    case 5: return .expired
+    case 6: return .busy
+    default: return nil
+    }
+  }
+
+  private static func setupTestFailureCode(_ failure: TrackingSetupFailure) -> Int64 {
+    switch failure {
+    case .wrongVehicle: return 1
+    case .permissionRequired: return 2
+    case .routeMismatch: return 3
+    case .endBeforeStart: return 4
+    case .expired: return 5
+    default: return 6
+    }
   }
 }
 

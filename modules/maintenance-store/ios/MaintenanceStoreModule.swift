@@ -57,8 +57,9 @@ public class MaintenanceStoreModule: Module {
       return ["disclosureAccepted": bootstrap.disclosureAccepted, "disclosureVersion": bootstrap.disclosureVersion, "schemaVersion": bootstrap.schemaVersion]
     }
 
-    AsyncFunction("getVehicles") { () throws -> [[String: Any]] in
-      try self.localStore().vehicles(archived: false).map { try self.vehicleDictionary($0) }
+    AsyncFunction("getVehicles") { () async throws -> [[String: Any]] in
+      let permissionReady = await MainActor.run { MaintenanceTrackingRuntime.shared.locationPermissionStatus() == "always" }
+      return try self.localStore().vehicles(archived: false).map { try self.vehicleDictionary($0, locationReady: permissionReady) }
     }
 
     AsyncFunction("getArchivedVehicles") { () throws -> [[String: Any]] in
@@ -209,11 +210,44 @@ public class MaintenanceStoreModule: Module {
       return ["state": try self.localStore().trackingState()]
     }
 
-    AsyncFunction("getTrackingSetup") { (vehicleId: String) throws -> [String: Any] in
+    AsyncFunction("getTrackingSetup") { (vehicleId: String) async throws -> [String: Any] in
       guard let nativeVehicleId = Int64(vehicleId) else { throw LocalStoreError.invalidVehicle }
-      let manager = CLLocationManager()
-      let locationReady = manager.authorizationStatus == .authorizedAlways && manager.accuracyAuthorization == .fullAccuracy
-      return Self.trackingSetupDictionary(try self.localStore().trackingSetup(for: nativeVehicleId, locationReady: locationReady))
+      let setup = try await MainActor.run { try MaintenanceSetupRuntime.shared.snapshot(vehicleID: nativeVehicleId) }
+      return Self.trackingSetupDictionary(setup)
+    }
+
+    AsyncFunction("saveTrackingSetup") { (vehicleId: String, transport: String, setupID: String?, shortcutsReady: Bool, automationsReady: Bool, checklistConfirmed: Bool, confirmationToken: String?) async throws -> [String: Any] in
+      let configurationID = setupID.flatMap(Int64.init)
+      guard let id = Int64(vehicleId), let connection = SetupTransport(rawValue: transport), setupID == nil || configurationID != nil else { throw LocalStoreError.invalidVehicle }
+      let result = try await MainActor.run {
+        try MaintenanceSetupRuntime.shared.save(vehicleID: id, transport: connection, setupID: configurationID,
+          shortcutsReady: shortcutsReady, automationsReady: automationsReady, checklistConfirmed: checklistConfirmed, confirmationToken: confirmationToken)
+      }
+      return Self.setupMutationDictionary(result)
+    }
+
+    AsyncFunction("bindTrackingRoute") { (vehicleId: String, setupID: String, confirmationToken: String?) async throws -> [String: Any] in
+      guard let id = Int64(vehicleId), let setup = Int64(setupID) else { throw LocalStoreError.invalidVehicle }
+      let result = try await MainActor.run { try MaintenanceSetupRuntime.shared.bind(vehicleID: id, setupID: setup, confirmationToken: confirmationToken) }
+      return Self.setupMutationDictionary(result)
+    }
+
+    AsyncFunction("armTrackingSetupTest") { (vehicleId: String, setupID: String) async throws -> [String: Any] in
+      guard let id = Int64(vehicleId), let setup = Int64(setupID) else { throw LocalStoreError.invalidVehicle }
+      let result = try await MainActor.run { try MaintenanceSetupRuntime.shared.armTest(vehicleID: id, setupID: setup) }
+      return Self.setupMutationDictionary(result)
+    }
+
+    AsyncFunction("cancelTrackingSetupTest") { (vehicleId: String, setupID: String) async throws -> [String: Any] in
+      guard let id = Int64(vehicleId), let setup = Int64(setupID) else { throw LocalStoreError.invalidVehicle }
+      let result = try await MainActor.run { try MaintenanceSetupRuntime.shared.cancelTest(vehicleID: id, setupID: setup) }
+      return Self.setupMutationDictionary(result)
+    }
+
+    AsyncFunction("removeTrackingSetup") { (vehicleId: String, setupID: String) async throws -> [String: Any] in
+      guard let id = Int64(vehicleId), let setup = Int64(setupID) else { throw LocalStoreError.invalidVehicle }
+      let result = try await MainActor.run { try MaintenanceSetupRuntime.shared.remove(vehicleID: id, setupID: setup) }
+      return Self.setupMutationDictionary(result)
     }
 
     AsyncFunction("getLocationPermissionStatus") { () async -> String in
@@ -344,7 +378,7 @@ public class MaintenanceStoreModule: Module {
     throw LocalStoreError.invalidPhoto
   }
 
-  private func vehicleDictionary(_ vehicle: StoredGarageVehicle) throws -> [String: Any] {
+  private func vehicleDictionary(_ vehicle: StoredGarageVehicle, locationReady: Bool = false) throws -> [String: Any] {
     let filename = try localStore().heroPhotoFilename(for: vehicle.id)
     let photoURI: String?
     if let filename,
@@ -363,7 +397,7 @@ public class MaintenanceStoreModule: Module {
       "model": vehicle.model,
       "currentOdometerMilliMiles": String(vehicle.currentOdometerMilliMiles),
       "scheduleCount": vehicle.scheduleCount,
-      "trackingReadiness": vehicle.trackingReadiness,
+      "trackingReadiness": try locationReady && self.localStore().trackingSetup(for: vehicle.id, locationReady: locationReady).state == "ready" ? "automatic_setup" : "manual_only",
       "heroPhotoUri": photoURI as Any,
     ]
   }
@@ -404,9 +438,27 @@ public class MaintenanceStoreModule: Module {
   }
 
   private static func trackingSetupDictionary(_ setup: StoredTrackingSetup) -> [String: Any] {
-    [
+    var result: [String: Any] = [
       "vehicleId": String(setup.vehicleId), "state": setup.state, "locationReady": setup.locationReady,
+      "shortcutsReady": setup.shortcutsReady, "automationsReady": setup.automationsReady,
+      "checklistConfirmed": setup.checklistConfirmed, "routeReady": setup.routeReady,
+      "testReady": setup.testReady, "testState": setup.testState,
     ]
+    if let id = setup.setupID { result["setupId"] = String(id) }
+    if let transport = setup.transport { result["transport"] = transport.rawValue }
+    if let failure = setup.testFailure { result["testFailure"] = failure }
+    return result
+  }
+
+  private static func setupMutationDictionary(_ result: SetupMutationResult) -> [String: Any] {
+    var dictionary: [String: Any] = ["setup": trackingSetupDictionary(result.setup)]
+    if let failure = result.failure {
+      dictionary["failure"] = failure.code
+      dictionary["message"] = failure.errorDescription
+    }
+    if let vehicle = result.conflictingVehicle { dictionary["conflictingVehicle"] = ["id": String(vehicle.id), "nickname": vehicle.nickname] }
+    if let token = result.confirmationToken { dictionary["confirmationToken"] = token }
+    return dictionary
   }
 
   private static func tripRevisionDictionary(_ revision: StoredTripRevision) -> [String: Any] {

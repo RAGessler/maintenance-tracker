@@ -1,4 +1,5 @@
 import CoreLocation
+import AVFAudio
 import Foundation
 
 @MainActor
@@ -24,6 +25,7 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
   private var ownedSession: SessionIdentity?
   private var shouldRequestAlways = false
   private var deadlineTimer: Timer?
+  private var routeObserver: NSObjectProtocol?
   private let foregroundPermissionGate = ForegroundPermissionRequestGate()
 
   private override init() {
@@ -31,6 +33,15 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
     locationManager.delegate = self
     locationManager.activityType = .automotiveNavigation
     locationManager.pausesLocationUpdatesAutomatically = false
+    routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: AVAudioSession.sharedInstance(), queue: .main) { [weak self] _ in
+      Task { @MainActor in
+        guard let self else { return }
+        do {
+          try self.observeAutomaticRoute(now: Self.now())
+          try self.reconcileAfterCommand(now: Self.now())
+        } catch { self.failClosed(.locationFailed, now: Self.now()) }
+      }
+    }
   }
 
   func locationPermissionStatus() -> String {
@@ -59,6 +70,7 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
   }
 
   func startAutomatic(vehicleID: Int64, now: Int64) throws {
+    if try receiveSetupCommand(vehicleID: vehicleID, isStart: true, now: now) { return }
     do {
       try prepareForNewCommand(vehicleID: vehicleID, source: .automatic, now: now)
       guard hasPreciseAlwaysPermission else {
@@ -70,6 +82,8 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
       try engine.startAutomatic(vehicleID: vehicleID, now: now)
       guard let session = try store().session() else { throw LocalStoreError.trackingConflict }
       adopt(session, preservingExistingAnchors: true)
+      try observeAutomaticRoute(now: now)
+      guard try store().session() != nil else { throw TrackingSetupFailure.routeMismatch }
       beginLocationCollection(for: session)
       scheduleDeadline(for: session, now: now)
     } catch let error as LocalStoreError where isNonDestructiveCommandRejection(error) {
@@ -111,6 +125,7 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
   }
 
   func end(vehicleID: Int64, now: Int64) throws {
+    if try receiveSetupCommand(vehicleID: vehicleID, isStart: false, now: now) { return }
     do {
       if let active = try store().session(), active.vehicleID != vehicleID {
         throw TrackingEngineError.wrongVehicle
@@ -135,6 +150,10 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
     }
   }
 
+  func cancelPendingManualStartForSetupTest() {
+    foregroundPermissionGate.cancel()
+  }
+
   /// Foreground reconciliation is synchronous on MainActor so snapshots never race a detached resume.
   func resume(now: Int64) throws {
     do {
@@ -150,6 +169,7 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
         failClosed(.locationPermissionLost, now: now)
         return
       }
+      try observeAutomaticRoute(now: now)
       try engine().tick(now: now)
       guard let session = try store().session() else {
         resetTransientState()
@@ -201,6 +221,7 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
   func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
     let now = Self.now()
     do {
+      try observeAutomaticRoute(now: now)
       try reconcileOwnedSession(now: now)
       guard let session = try store().session(), ownedSession == SessionIdentity(session) else { return }
 
@@ -348,6 +369,7 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
         return
       }
 
+      try observeAutomaticRoute(now: now)
       try engine.end(vehicleID: persisted.vehicleID, now: now)
       guard try repository.session() == nil else {
         throw LocalStoreError.trackingConflict
@@ -506,8 +528,9 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
       Task { @MainActor in
         guard let self else { return }
         self.deadlineTimer = nil
-        do {
-          try self.reconcileOwnedSession(now: Self.now())
+         do {
+           try self.observeAutomaticRoute(now: Self.now())
+           try self.reconcileOwnedSession(now: Self.now())
           try self.reconcileAfterCommand(now: Self.now())
         } catch {
           self.failClosed(.locationFailed, now: Self.now())
@@ -543,6 +566,38 @@ final class MaintenanceTrackingRuntime: NSObject, @preconcurrency CLLocationMana
   }
 
   private func engine() throws -> TrackingEngine { TrackingEngine(repository: try store()) }
+
+  private func observeAutomaticRoute(now: Int64) throws {
+    let repository = try store()
+    try repository.withTrackingTransition {
+      guard let session = try repository.session(), session.source == .automatic,
+            ownedSession == SessionIdentity(session) else { return }
+      let engine = TrackingEngine(repository: repository)
+      guard permissionIsUsable(for: session.source) else {
+        try engine.permissionLost(now: now)
+        resetTransientState()
+        return
+      }
+      if let route = try MaintenanceAudioRoute.current() {
+        try engine.receive(route: repository.routeEvidence(for: session.vehicleID, kind: route.kind, opaqueValue: route.opaqueValue), now: now)
+      } else if session.routeEvidence == .matching && session.state != .recovering {
+        try engine.routeLost(now: now, carPlayActive: false)
+      }
+      if try repository.session() == nil { resetTransientState() }
+    }
+  }
+
+  private func receiveSetupCommand(vehicleID: Int64, isStart: Bool, now: Int64) throws -> Bool {
+    // A setup test is native-owned and persists across React Native/process absence.
+    // It intercepts the saved actions before normal trip creation or completion.
+    let result = try store().receiveSetupCommand(vehicleID: vehicleID, isStart: isStart,
+      route: try MaintenanceAudioRoute.current(), locationReady: hasPreciseAlwaysPermission, now: now)
+    switch result {
+    case .notTesting: return false
+    case .handled: return true
+    case .rejected(let failure): throw failure
+    }
+  }
 
   private func store() throws -> LocalStore {
     let directory = try TrackingIntentStore.storeDirectory()

@@ -27,12 +27,14 @@ export function VehicleDashboard({
   onEdit,
   onOpenSchedule,
   onUpdateOdometer,
+  onSetup,
 }: Readonly<{
   vehicle: GarageVehicle;
   onBack: () => void;
   onEdit: () => void;
   onOpenSchedule: (scheduleId: string) => void;
   onUpdateOdometer: () => void;
+  onSetup: () => void;
 }>) {
   const [items, setItems] = useState<DueItem[]>([]);
   const [baseline, setBaseline] = useState<ManualOdometerReading | null>(null);
@@ -110,6 +112,11 @@ export function VehicleDashboard({
             </View>
             <ThemedText style={styles.baseline}>{baseline ? `Baseline ${formatMilliMiles(baseline.milliMiles, true)} mi · ${formatShortDate(baseline.effectiveAt)}` : 'No manual odometer reading yet'}</ThemedText>
           </Card>
+          <Card><Pressable accessibilityRole="button" accessibilityLabel="Automatic tracking setup" onPress={onSetup} style={styles.setupRow}>
+            <SymbolView name="bolt.fill" tintColor={TorqueColors.primary} size={22} />
+            <View style={styles.setupText}><ThemedText style={styles.maintenanceTitle}>Automatic tracking</ThemedText><ThemedText style={styles.muted}>{vehicle.trackingReadiness === 'automatic_setup' ? 'Setup ready · review the configuration' : 'Manual only · finish setup to enable'}</ThemedText></View>
+            <Chevron />
+          </Pressable></Card>
           <View style={styles.maintenanceHead}>
             <ThemedText accessibilityRole="header" style={styles.maintenanceTitle}>
               Maintenance
@@ -188,6 +195,8 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: TorqueColors.canvas },
   content: { paddingBottom: Spacing.three, gap: Spacing.three },
   body: { paddingHorizontal: Spacing.three, gap: Spacing.three },
+  setupRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, padding: Spacing.three, minHeight: 56 },
+  setupText: { flex: 1, gap: 4 },
   hero: { overflow: 'hidden', backgroundColor: TorqueColors.card },
   heroImage: { width: '100%', height: 260 },
   heroFallback: { backgroundColor: TorqueColors.accentSurface, alignItems: 'center', justifyContent: 'center' },

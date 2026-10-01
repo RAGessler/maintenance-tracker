@@ -116,7 +116,7 @@ test('trip-tracking forwards only typed foundation commands', async () => {
   assert.deepEqual(await store.tracking.start('7', 'automatic'), { state: 'tracking' });
   assert.deepEqual(await store.tracking.stop(), { state: 'idle' });
   assert.deepEqual(calls, [['7', 'automatic'], []]);
-  assert.deepEqual(Object.keys(store.tracking).sort(), ['getLocationPermissionStatus', 'getRevisions', 'getSetup', 'getSnapshot', 'getTrips', 'requestLocationPermission', 'review', 'start', 'stop']);
+  assert.deepEqual(Object.keys(store.tracking).sort(), ['armSetupTest', 'bindRoute', 'cancelSetupTest', 'getLocationPermissionStatus', 'getRevisions', 'getSetup', 'getSnapshot', 'getTrips', 'removeSetup', 'requestLocationPermission', 'review', 'saveSetup', 'start', 'stop']);
 });
 
 test('trip-tracking exposes reviewed manual trips without persistence internals', async () => {
@@ -160,14 +160,37 @@ test('trip-tracking exposes vehicle setup state without route identifiers', asyn
     startTracking: async () => ({ state: 'tracking' as const }), stopTracking: async () => ({ state: 'idle' as const }),
     getTrackingSetup: async (...args: unknown[]) => {
       calls.push(args);
-      return { vehicleId: '7', state: 'incomplete', locationReady: false };
+      return { vehicleId: '7', state: 'incomplete', locationReady: false, shortcutsReady: false, automationsReady: false, checklistConfirmed: false, routeReady: false, testReady: false, testState: 'idle' };
     },
   } as unknown as NativeMaintenanceStore;
 
   const setup = await createMaintenanceStore(native).tracking.getSetup('7');
 
   assert.deepEqual(calls, [['7']]);
-  assert.deepEqual(setup, { vehicleId: '7', state: 'incomplete', locationReady: false });
+  assert.deepEqual(setup, { vehicleId: '7', state: 'incomplete', locationReady: false, shortcutsReady: false, automationsReady: false, checklistConfirmed: false, routeReady: false, testReady: false, testState: 'idle' });
+});
+
+test('setup forwards attestation, guarded native route binding and real-command tests without route identifiers', async () => {
+  const calls: unknown[][] = [];
+  const setup = { vehicleId: '7', state: 'incomplete', locationReady: true, shortcutsReady: true, automationsReady: true, checklistConfirmed: true, routeReady: false, testReady: false, testState: 'idle' };
+  const native = {
+    saveTrackingSetup: async (...args: unknown[]) => { calls.push(['save', ...args]); return { setup }; },
+    bindTrackingRoute: async (...args: unknown[]) => { calls.push(['bind', ...args]); return { setup }; },
+    armTrackingSetupTest: async (...args: unknown[]) => { calls.push(['test', ...args]); return { setup }; },
+  } as unknown as NativeMaintenanceStore;
+  const tracking = createMaintenanceStore(native).tracking;
+  await tracking.saveSetup({ vehicleId: '7', transport: 'wireless_carplay', shortcutsReady: true, automationsReady: true, checklistConfirmed: true });
+  await tracking.bindRoute({ vehicleId: '7', setupId: '8' });
+  await tracking.armSetupTest('7', '8');
+  assert.deepEqual(calls, [
+    ['save', '7', 'wireless_carplay', undefined, true, true, true, undefined],
+    ['bind', '7', '8', undefined], ['test', '7', '8'],
+  ]);
+});
+
+test('an older native setup snapshot requires a rebuild instead of claiming readiness', async () => {
+  const native = { getTrackingSetup: async () => ({ vehicleId: '7', state: 'ready', locationReady: true }) } as unknown as NativeMaintenanceStore;
+  await assert.rejects(() => createMaintenanceStore(native).tracking.getSetup('7'), /Rebuild and reinstall/);
 });
 
 test('trip-tracking exposes an ordered audit trail without storage internals', async () => {

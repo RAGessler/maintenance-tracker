@@ -91,6 +91,10 @@ public final class TrackingEngine {
 
   public func receive(route: RouteEvidence, now: Int64) throws {
     try repository.withTrackingTransition {
+      if route != .matching, let session = try repository.session() {
+        try finish(session, completion: .notCompleted, reason: route == .unknown ? .unknownRoute : .conflictingRoute, now: now)
+        return
+      }
       try tickInTransition(now: now)
       guard var session = try repository.session() else { return }
       switch route {

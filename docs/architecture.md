@@ -22,11 +22,16 @@ The repository has an Expo SDK 57 development-build foundation with:
 - Continuous Native Generation;
 - `expo-dev-client` for native integrations;
 - generated, uncommitted iOS and Android projects;
-- a schema-version-1 native-owned SQLite store and local Expo module for the private iOS beta.
+- a schema-version-3 native-owned SQLite store and local Expo module for the private iOS beta;
+- vehicle setup with persisted checklist attestations, exclusive observed route bindings, and a
+  bounded native Start/End Shortcut test that creates no trip or mileage;
+- installation-scoped App Intent vehicle choices, so a saved choice cannot alias a reused row ID
+  after a local data reset.
 
-The native store is the first MVP implementation slice. The garage, records, schedules, complete
-tracking lifecycle, privacy controls, export, and release systems remain in their respective MVP
-implementation issues.
+Garage, records, schedules, odometer reconciliation, Activity, and setup flows have implementations.
+Complete tracking lifecycle qualification, privacy controls, export, and release verification remain
+in their respective MVP implementation issues. A simulator or local Release build is not physical
+stereo-path or TestFlight qualification.
 
 ## Approved tracking boundaries
 

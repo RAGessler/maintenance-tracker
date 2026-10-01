@@ -112,6 +112,41 @@ after seven days, requiring a rebuild and reinstall. Paid Apple Developer Progra
 required for TestFlight and ad hoc distribution. If the phone requests developer trust, follow its
 prompt in Settings > General > VPN & Device Management, then reopen the app.
 
+### Automatic tracking setup
+
+Open a vehicle's dashboard and choose **Automatic tracking** (also available from Edit). The
+checklist includes location permission, vehicle-bound Shortcuts, Personal Automations, the native
+setup test, route binding, and your explicit confirmation. Granting location alone does not enable
+automatic tracking.
+
+1. Choose **Bluetooth audio**, **Wireless CarPlay**, or **Wired CarPlay**. The app supplies
+   connection-specific instructions. Wired CarPlay has one automatic vehicle assignment per iPhone;
+   reassignment requires confirmation and a new test.
+2. In Apple Shortcuts, create normal Start Trip and End Trip Shortcuts using the app's actions. Set a
+   fixed vehicle in both actions, then confirm them in the app. After upgrading from the initial phone
+   build, reselect Vehicle in older saved actions once; installation-scoped identifiers prevent an old
+   choice from silently pointing at another profile after a data reset.
+3. Configure both Personal Automations with **Run Immediately**, then confirm them in the app:
+   - Bluetooth audio: select the exact device for Connects → Start and Disconnects → End.
+   - Wireless CarPlay: select the exact Bluetooth device for Connects → Start; use CarPlay
+     Disconnects → End. Do not end the trip on the initial Bluetooth transport handoff.
+   - Wired CarPlay: CarPlay Connects → Start and Disconnects → End for the single assigned vehicle.
+4. Connect to the car, select its stereo as the audio output, and play audio. Choose **Route binding**
+   to observe and bind the actual route. The app does not scan or identify vehicles from Bluetooth
+   names. A CarPlay binding is a normalized corroboration heuristic, not guaranteed hardware identity.
+5. Confirm the checklist, then choose **Run setup test**. While the car stays connected, run the saved
+   Start Trip and End Trip Shortcuts and return to the app. Both actions must deliver for the selected
+   vehicle with matching route evidence. The ten-minute, native-owned test creates no trip, GPS
+   session, or odometer change and can be cancelled.
+
+The simulator can verify the checklist and failure states, but cannot supply a real car audio route.
+Normal trip confirmation still requires movement, matching route evidence, and a normal end.
+Background/locked delivery is best effort; force-quit and exact timing are not promised.
+
+This build migrates the local store forward from schema v2 to v3, retaining existing records and
+adding setup evidence and installation-scoped Shortcut identities. Older builds cannot read v3.
+Rebuild the native app after these changes; refreshing JavaScript alone is insufficient.
+
 For UI-only work that does not depend on custom native code, Expo Go remains available:
 
 ```bash

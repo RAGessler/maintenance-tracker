@@ -239,6 +239,19 @@ func keepsManualSessionsSeparateFromAutomaticCommands() throws {
   #expect(try store.session()?.maximumDurationDeadline == 43_200_002)
 }
 
+@Test("unknown observed route wins over an expired grace completion")
+func rejectsUnknownRouteBeforeDeadlineCompletion() throws {
+  let repository = InMemoryTrackingRepository()
+  let engine = TrackingEngine(repository: repository)
+  try engine.startAutomatic(vehicleID: 1, now: 10)
+  try engine.receive(route: .matching, now: 20)
+  try engine.receive(location: .init(timestamp: 30, speedMetersPerSecond: 3, displacementMeters: 0, distanceMilliMiles: 100), now: 30)
+  try engine.routeLost(now: 50, carPlayActive: false)
+  try engine.receive(route: .unknown, now: 180_051)
+  #expect(repository.finalizations.first?.disposition == .reviewRequired)
+  #expect(repository.finalizations.first?.reason == .unknownRoute)
+}
+
 private final class InMemoryTrackingRepository: TrackingSessionRepository {
   var currentSession: TrackingSession?
   var finalizations: [TrackingFinalization] = []

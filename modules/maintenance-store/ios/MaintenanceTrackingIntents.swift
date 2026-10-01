@@ -18,14 +18,18 @@ struct TrackingVehicle: AppEntity, Identifiable {
 @available(iOS 16.0, *)
 struct TrackingVehicleQuery: EntityQuery {
   func entities(for identifiers: [TrackingVehicle.ID]) async throws -> [TrackingVehicle] {
-    let wanted = Set(identifiers)
-    return try TrackingIntentStore.open().shortcutVehicles()
-      .map(TrackingVehicle.init)
-      .filter { wanted.contains($0.id) }
+    let store = try TrackingIntentStore.open()
+    return try identifiers.compactMap { identifier in
+      guard let vehicle = try store.shortcutVehicle(identifier: identifier) else { return nil }
+      return TrackingVehicle(vehicle, identifier: identifier)
+    }
   }
 
   func suggestedEntities() async throws -> [TrackingVehicle] {
-    try TrackingIntentStore.open().shortcutVehicles().map(TrackingVehicle.init)
+    let store = try TrackingIntentStore.open()
+    return try store.shortcutVehicles().map { vehicle in
+      TrackingVehicle(vehicle, identifier: try store.shortcutIdentifier(for: vehicle.id))
+    }
   }
 }
 
@@ -37,8 +41,10 @@ struct StartTripIntent: AppIntent {
 
   @Parameter(title: "Vehicle") var vehicle: TrackingVehicle
 
+  static var parameterSummary: some ParameterSummary { Summary("Start trip for \(\.$vehicle)") }
+
   func perform() async throws -> some IntentResult {
-    guard let vehicleId = Int64(vehicle.id) else { throw LocalStoreError.invalidVehicle }
+    guard let vehicleId = try TrackingIntentStore.open().shortcutVehicle(identifier: vehicle.id)?.id else { throw LocalStoreError.invalidVehicle }
     try await MainActor.run { try MaintenanceTrackingRuntime.shared.startAutomatic(vehicleID: vehicleId, now: TrackingIntentStore.now()) }
     return .result()
   }
@@ -52,8 +58,10 @@ struct EndTripIntent: AppIntent {
 
   @Parameter(title: "Vehicle") var vehicle: TrackingVehicle
 
+  static var parameterSummary: some ParameterSummary { Summary("End trip for \(\.$vehicle)") }
+
   func perform() async throws -> some IntentResult {
-    guard let vehicleId = Int64(vehicle.id) else { throw LocalStoreError.invalidVehicle }
+    guard let vehicleId = try TrackingIntentStore.open().shortcutVehicle(identifier: vehicle.id)?.id else { throw LocalStoreError.invalidVehicle }
     try await MainActor.run { try MaintenanceTrackingRuntime.shared.end(vehicleID: vehicleId, now: TrackingIntentStore.now()) }
     return .result()
   }
@@ -81,8 +89,8 @@ enum TrackingIntentStore {
 
 @available(iOS 16.0, *)
 private extension TrackingVehicle {
-  init(_ vehicle: StoredVehicle) {
-    id = String(vehicle.id)
+  init(_ vehicle: StoredVehicle, identifier: String) {
+    id = identifier
     name = vehicle.nickname
     detail = "\(vehicle.year) \(vehicle.make) \(vehicle.model)"
   }

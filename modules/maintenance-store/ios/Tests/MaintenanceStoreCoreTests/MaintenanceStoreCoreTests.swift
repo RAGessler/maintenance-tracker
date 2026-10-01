@@ -691,12 +691,12 @@ func refusesNewerSchemaWithoutFallback() throws {
 
   let database = try openDatabase(at: databaseURL)
   defer { sqlite3_close(database) }
-  #expect(execute(database, "PRAGMA user_version = 3") == SQLITE_OK)
+  #expect(execute(database, "PRAGMA user_version = 4") == SQLITE_OK)
 
-  #expect(throws: LocalStoreError.unsupportedSchema(3)) {
+  #expect(throws: LocalStoreError.unsupportedSchema(4)) {
     _ = try LocalStore(path: databaseURL.path)
   }
-  #expect(try userVersion(database) == 3)
+  #expect(try userVersion(database) == 4)
   #expect(try tableExists(database, named: "installation_state") == false)
 }
 
