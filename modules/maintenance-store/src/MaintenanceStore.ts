@@ -113,10 +113,41 @@ export type TrackingSnapshot = Readonly<{
   state: 'idle' | 'tracking' | 'recovering';
 }>;
 
+export type SetupTransport = 'bluetooth' | 'wireless_carplay' | 'wired_carplay';
+
 export type TrackingSetup = Readonly<{
   vehicleId: string;
   state: 'incomplete' | 'ready';
   locationReady: boolean;
+  setupId?: string;
+  transport?: SetupTransport;
+  shortcutsReady: boolean;
+  automationsReady: boolean;
+  checklistConfirmed: boolean;
+  routeReady: boolean;
+  testReady: boolean;
+  testState: 'idle' | 'waiting_start' | 'waiting_end' | 'passed' | 'failed';
+  testFailure?: string;
+}>;
+
+export type SaveTrackingSetupInput = Readonly<{
+  vehicleId: string;
+  transport: SetupTransport;
+  setupId?: string;
+  shortcutsReady: boolean;
+  automationsReady: boolean;
+  checklistConfirmed: boolean;
+  confirmationToken?: string;
+}>;
+
+export type BindTrackingRouteInput = Readonly<{ vehicleId: string; setupId: string; confirmationToken?: string }>;
+
+export type SetupMutationResult = Readonly<{
+  setup: TrackingSetup;
+  failure?: string;
+  message?: string;
+  conflictingVehicle?: Readonly<{ id: string; nickname: string }>;
+  confirmationToken?: string;
 }>;
 
 export type LocationPermissionStatus = 'not_determined' | 'when_in_use' | 'always' | 'always_reduced' | 'denied' | 'restricted' | 'unavailable';
@@ -164,6 +195,11 @@ export interface NativeMaintenanceStore {
   ): Promise<Vehicle>;
   getTrackingSnapshot(): Promise<TrackingSnapshot>;
   getTrackingSetup?(vehicleId: string): Promise<TrackingSetup>;
+  saveTrackingSetup?(vehicleId: string, transport: SetupTransport, setupId: string | undefined, shortcutsReady: boolean, automationsReady: boolean, checklistConfirmed: boolean, confirmationToken?: string): Promise<SetupMutationResult>;
+  bindTrackingRoute?(vehicleId: string, setupId: string, confirmationToken?: string): Promise<SetupMutationResult>;
+  armTrackingSetupTest?(vehicleId: string, setupId: string): Promise<SetupMutationResult>;
+  cancelTrackingSetupTest?(vehicleId: string, setupId: string): Promise<SetupMutationResult>;
+  removeTrackingSetup?(vehicleId: string, setupId: string): Promise<SetupMutationResult>;
   getLocationPermissionStatus?(): Promise<LocationPermissionStatus>;
   requestLocationPermission?(): Promise<LocationPermissionStatus>;
   startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
@@ -220,6 +256,11 @@ export type MaintenanceStore = Readonly<{
   tracking: Readonly<{
     getSnapshot(): Promise<TrackingSnapshot>;
     getSetup(vehicleId: string): Promise<TrackingSetup>;
+    saveSetup(input: SaveTrackingSetupInput): Promise<SetupMutationResult>;
+    bindRoute(input: BindTrackingRouteInput): Promise<SetupMutationResult>;
+    armSetupTest(vehicleId: string, setupId: string): Promise<SetupMutationResult>;
+    cancelSetupTest(vehicleId: string, setupId: string): Promise<SetupMutationResult>;
+    removeSetup(vehicleId: string, setupId: string): Promise<SetupMutationResult>;
     getLocationPermissionStatus(): Promise<LocationPermissionStatus>;
     requestLocationPermission(): Promise<LocationPermissionStatus>;
     start(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;
@@ -324,9 +365,33 @@ export function createMaintenanceStore(native: NativeMaintenanceStore): Maintena
     },
     tracking: {
       getSnapshot: () => native.getTrackingSnapshot(),
-      getSetup: (vehicleId) => {
+      getSetup: async (vehicleId) => {
         if (typeof native.getTrackingSetup !== 'function') return Promise.reject(new Error('Rebuild the iOS development client to manage automatic tracking setup.'));
-        return native.getTrackingSetup(vehicleId);
+        const setup = await native.getTrackingSetup(vehicleId);
+        if ([setup.shortcutsReady, setup.automationsReady, setup.checklistConfirmed, setup.routeReady, setup.testReady].some((value) => typeof value !== 'boolean')) {
+          throw new Error('Rebuild and reinstall Maintenance Tracker to complete automatic tracking setup.');
+        }
+        return setup;
+      },
+      saveSetup: (input) => {
+        if (!native.saveTrackingSetup) return Promise.reject(new Error('Rebuild and reinstall Maintenance Tracker to complete automatic tracking setup.'));
+        return native.saveTrackingSetup(input.vehicleId, input.transport, input.setupId, input.shortcutsReady, input.automationsReady, input.checklistConfirmed, input.confirmationToken);
+      },
+      bindRoute: (input) => {
+        if (!native.bindTrackingRoute) return Promise.reject(new Error('Rebuild and reinstall Maintenance Tracker to bind the car route.'));
+        return native.bindTrackingRoute(input.vehicleId, input.setupId, input.confirmationToken);
+      },
+      armSetupTest: (vehicleId, setupId) => {
+        if (!native.armTrackingSetupTest) return Promise.reject(new Error('Rebuild and reinstall Maintenance Tracker to run a setup test.'));
+        return native.armTrackingSetupTest(vehicleId, setupId);
+      },
+      cancelSetupTest: (vehicleId, setupId) => {
+        if (!native.cancelTrackingSetupTest) return Promise.reject(new Error('Rebuild and reinstall Maintenance Tracker to cancel a setup test.'));
+        return native.cancelTrackingSetupTest(vehicleId, setupId);
+      },
+      removeSetup: (vehicleId, setupId) => {
+        if (!native.removeTrackingSetup) return Promise.reject(new Error('Rebuild and reinstall Maintenance Tracker to remove tracking setup.'));
+        return native.removeTrackingSetup(vehicleId, setupId);
       },
       getLocationPermissionStatus: () => native.getLocationPermissionStatus?.() ?? Promise.resolve('unavailable'),
       requestLocationPermission: () => {

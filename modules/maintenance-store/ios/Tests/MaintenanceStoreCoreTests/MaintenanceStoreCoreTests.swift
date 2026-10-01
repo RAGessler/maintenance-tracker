@@ -189,6 +189,96 @@ func confirmsManualTripWithUsableDistance() throws {
   #expect(try store.confirmedTripDistances(for: vehicle.id).map(\.effectiveMilliMiles) == [1_234])
 }
 
+@Test("finalization rollback keeps session and does not leave a partial trip")
+func rollsBackFailedTrackingFinalization() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+  try store.startTracking(vehicleId: vehicle.id, source: "manual", now: 3)
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+  #expect(execute(database, "CREATE TRIGGER reject_tracking_revision BEFORE INSERT ON trip_revision BEGIN SELECT RAISE(ABORT, 'test rollback'); END") == SQLITE_OK)
+
+  #expect(throws: LocalStoreError.self) { try store.stopTracking(now: 4) }
+  #expect(try store.session() != nil)
+  #expect(try store.trips(for: vehicle.id).isEmpty)
+}
+
+@Test("stale same-vehicle session cannot be saved or finalized")
+func rejectsStalePersistedSessionIdentity() throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let store = try LocalStore(path: databaseURL.path)
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+  try store.startTracking(vehicleId: vehicle.id, source: "manual", now: 3)
+  let stale = try #require(try store.session())
+  let database = try openDatabase(at: databaseURL)
+  defer { sqlite3_close(database) }
+  #expect(execute(database, "UPDATE tracking_session SET started_at = 4 WHERE id = 1") == SQLITE_OK)
+
+  #expect(throws: LocalStoreError.trackingConflict) { try store.save(stale) }
+  #expect(throws: LocalStoreError.trackingConflict) {
+    try store.finalize(.init(disposition: .reviewRequired, completion: .explicitEnd, reason: .movementNotConfirmed, distanceMilliMiles: 0), session: stale, now: 5)
+  }
+  #expect(try store.trackingState() == "tracking")
+  #expect(try store.trips(for: vehicle.id).isEmpty)
+}
+
+@Test("a clock rollback fails closed and a later session keeps its supplied timestamp")
+func rejectsClockRollbackWithoutManufacturingSessionTime() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+  try store.startTracking(vehicleId: vehicle.id, source: "manual", now: 100)
+  let oldSession = try #require(try store.session())
+  try store.stopTracking(now: 200)
+
+  #expect(throws: LocalStoreError.trackingConflict) {
+    try store.startTracking(vehicleId: vehicle.id, source: "manual", now: oldSession.startedAt)
+  }
+  #expect(try store.session() == nil)
+
+  try store.startTracking(vehicleId: vehicle.id, source: "manual", now: 201)
+  let replacement = try #require(try store.session())
+  #expect(replacement.startedAt == 201)
+  #expect(replacement.maximumDurationDeadline == 43_200_201)
+  #expect(throws: LocalStoreError.trackingConflict) {
+    try store.finalize(.init(disposition: .reviewRequired, completion: .explicitEnd, reason: .locationFailed, distanceMilliMiles: 0), session: oldSession, now: 300)
+  }
+  #expect(try store.session() == replacement)
+}
+
+@Test("concurrent engines on separate SQLite connections do not lose aggregate increments")
+func serializesConcurrentTrackingTransitions() async throws {
+  let directoryURL = try temporaryDirectory()
+  let databaseURL = directoryURL.appendingPathComponent("store.sqlite")
+  defer { try? FileManager.default.removeItem(at: directoryURL) }
+  let initialStore = try LocalStore(path: databaseURL.path)
+  _ = try initialStore.acceptDisclosure(version: 1, now: 1)
+  let vehicle = try initialStore.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+  try initialStore.startTracking(vehicleId: vehicle.id, source: "manual", now: 10)
+  let stores = try (0..<6).map { _ in try LocalStore(path: databaseURL.path) }
+
+  try await withThrowingTaskGroup(of: Void.self) { group in
+    for worker in 0..<12 {
+      group.addTask {
+        let engine = TrackingEngine(repository: stores[worker % stores.count])
+        for _ in 0..<10 {
+          try engine.receive(location: .init(timestamp: 11, speedMetersPerSecond: 3, displacementMeters: 0, distanceMilliMiles: 1), now: 11)
+        }
+      }
+    }
+    try await group.waitForAll()
+  }
+
+  #expect(try initialStore.session()?.cumulativeMilliMiles == 120)
+}
+
 @Test("a competing vehicle cannot replace an active tracking session")
 func rejectsCompetingTrackingStart() throws {
   let store = try LocalStore(path: ":memory:")
@@ -244,8 +334,8 @@ func describesTrackingFailures() {
   #expect(LocalStoreError.trackingSetupIncomplete.errorDescription == "Open Maintenance Tracker and complete automatic tracking setup for this vehicle before using the Shortcut.")
 }
 
-@Test("tracking setup requires only location and no route observation")
-func requiresOnlyLocationWithoutRouteObservation() throws {
+@Test("automatic readiness requires tested configuration and route observation")
+func requiresCompleteAutomaticSetup() throws {
   let store = try LocalStore(path: ":memory:")
   _ = try store.acceptDisclosure(version: 1, now: 1)
   let daily = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
@@ -254,13 +344,40 @@ func requiresOnlyLocationWithoutRouteObservation() throws {
   try store.configureShortcut(for: daily.id, mode: "wired_carplay_shortcut", now: 4)
   let incomplete = try store.trackingSetup(for: daily.id, locationReady: true)
 
-  #expect(incomplete.state == "ready")
+  #expect(incomplete.state == "incomplete")
+  #expect(throws: LocalStoreError.trackingSetupIncomplete) { try store.beginAutomatic(vehicleID: daily.id, now: 5) }
   #expect(throws: LocalStoreError.trackingConflict) {
     try store.configureShortcut(for: weekend.id, mode: "wired_carplay_shortcut", now: 6)
   }
+  try store.recordShortcutTest(for: daily.id, now: 6)
+  try store.recordRouteObservation(for: daily.id, kind: "carplay_route", opaqueValue: "daily-carplay", now: 7)
   #expect(try store.trackingSetup(for: daily.id, locationReady: true).state == "ready")
-  _ = try store.beginAutomatic(vehicleID: weekend.id, now: 8)
-  #expect(try store.session()?.vehicleID == weekend.id)
+  let firstSession = try store.beginAutomatic(vehicleID: daily.id, now: 9)
+  let duplicateSession = try store.beginAutomatic(vehicleID: daily.id, now: 10)
+  #expect(duplicateSession == firstSession)
+  #expect(firstSession.movementDeadline == 600_009)
+  #expect(firstSession.maximumDurationDeadline == 43_200_009)
+  #expect(throws: LocalStoreError.trackingConflict) { try store.beginAutomatic(vehicleID: weekend.id, now: 8) }
+  #expect(try store.session() == firstSession)
+}
+
+@Test("automatic setup binds only the route transport matching its configured Shortcut mode")
+func requiresCompatibleAutomaticRouteKind() throws {
+  let store = try LocalStore(path: ":memory:")
+  _ = try store.acceptDisclosure(version: 1, now: 1)
+  let bluetooth = try store.createVehicle(nickname: "Bluetooth", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
+  let carplay = try store.createVehicle(nickname: "CarPlay", year: 2021, make: "Honda", model: "Fit", initialOdometerMilliMiles: 0, now: 3)
+  try store.configureShortcut(for: bluetooth.id, mode: "bluetooth_shortcut", now: 4)
+  try store.recordShortcutTest(for: bluetooth.id, now: 5)
+  try store.recordRouteObservation(for: bluetooth.id, kind: "carplay_route", opaqueValue: "wrong-carplay", now: 6)
+  #expect(try store.trackingSetup(for: bluetooth.id, locationReady: true).state == "incomplete")
+  #expect(throws: LocalStoreError.trackingSetupIncomplete) { try store.beginAutomatic(vehicleID: bluetooth.id, now: 7) }
+
+  try store.configureShortcut(for: carplay.id, mode: "wired_carplay_shortcut", now: 8)
+  try store.recordShortcutTest(for: carplay.id, now: 9)
+  try store.recordRouteObservation(for: carplay.id, kind: "bluetooth_route", opaqueValue: "wrong-bluetooth", now: 10)
+  #expect(try store.trackingSetup(for: carplay.id, locationReady: true).state == "incomplete")
+  #expect(throws: LocalStoreError.trackingSetupIncomplete) { try store.beginAutomatic(vehicleID: carplay.id, now: 11) }
 }
 
 @Test("automatic sessions retain Shortcut attribution and route-observation outcome")
@@ -273,12 +390,18 @@ func retainsAutomaticTripAttribution() throws {
   _ = try store.acceptDisclosure(version: 1, now: 1)
   let vehicle = try store.createVehicle(nickname: "Daily", year: 2020, make: "Honda", model: "Civic", initialOdometerMilliMiles: 0, now: 2)
 
+  try store.configureShortcut(for: vehicle.id, mode: "bluetooth_shortcut", now: 2)
+  try store.recordShortcutTest(for: vehicle.id, now: 2)
+  try store.recordRouteObservation(for: vehicle.id, kind: "bluetooth_route", opaqueValue: "route", now: 2)
   try store.startTracking(vehicleId: vehicle.id, source: "automatic", now: 3, automaticSetupReady: true)
-  try store.stopTracking(now: 4)
+  try TrackingEngine(repository: store).receive(location: .init(timestamp: 4, speedMetersPerSecond: 3, displacementMeters: 0, distanceMilliMiles: 1_000), now: 4)
+  try store.stopTracking(now: 5)
 
   let database = try openDatabase(at: databaseURL)
   defer { sqlite3_close(database) }
   #expect(try scalar(database, "SELECT source = 'automatic' AND route_corroboration_outcome = 'not_observed' FROM trip") == 1)
+  #expect(try store.schemaVersion() == LocalStore.currentSchemaVersion)
+  #expect(try store.trips(for: vehicle.id).first?.failureReason == nil)
 }
 
 @Test("archiving an actively tracked vehicle is blocked")
@@ -568,12 +691,12 @@ func refusesNewerSchemaWithoutFallback() throws {
 
   let database = try openDatabase(at: databaseURL)
   defer { sqlite3_close(database) }
-  #expect(execute(database, "PRAGMA user_version = 3") == SQLITE_OK)
+  #expect(execute(database, "PRAGMA user_version = 4") == SQLITE_OK)
 
-  #expect(throws: LocalStoreError.unsupportedSchema(3)) {
+  #expect(throws: LocalStoreError.unsupportedSchema(4)) {
     _ = try LocalStore(path: databaseURL.path)
   }
-  #expect(try userVersion(database) == 3)
+  #expect(try userVersion(database) == 4)
   #expect(try tableExists(database, named: "installation_state") == false)
 }
 

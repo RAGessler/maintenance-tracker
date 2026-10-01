@@ -96,8 +96,19 @@ export default function ActivityScreen() {
       if (snapshot === 'tracking') await maintenanceStore.tracking.stop();
       else await maintenanceStore.tracking.start(selectedVehicleId, 'manual');
       await load();
-    } catch {
-      setError(snapshot === 'tracking' ? 'The active trip could not be stopped. Try again.' : 'A trip is already active for another vehicle. Stop it before starting this one.');
+    } catch (commandError: unknown) {
+      const message = commandError instanceof Error ? commandError.message : '';
+      if (message.startsWith('Rebuild the iOS development client')) {
+        setError(message);
+      } else if (snapshot === 'tracking') {
+        setError('The active trip could not be stopped. Try again.');
+      } else if (message.includes('trackingPermissionRequired') || message.includes('location access')) {
+        setError('Allow While Using the App location access to record a manual trip, then try again.');
+      } else if (message.includes('trackingConflict') || message.includes('different trip is already active')) {
+        setError('A trip is already active for another vehicle. Stop it before starting this one.');
+      } else {
+        setError('The trip could not be started. Check location access and try again.');
+      }
     } finally {
       setSaving(false);
     }

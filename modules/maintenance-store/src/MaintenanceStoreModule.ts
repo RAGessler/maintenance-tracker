@@ -1,6 +1,6 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import { createMaintenanceStore, type Bootstrap, type GarageVehicle, type LocationPermissionStatus, type MaintenanceRecord, type ManualOdometerReading, type NativeMaintenanceStore, type OdometerFacts, type RecoveryState, type ReviewTripInput, type TrackingSetup, type TrackingSnapshot, type Trip, type TripRevision, type Vehicle } from './MaintenanceStore';
+import { createMaintenanceStore, type Bootstrap, type GarageVehicle, type LocationPermissionStatus, type MaintenanceRecord, type ManualOdometerReading, type NativeMaintenanceStore, type OdometerFacts, type RecoveryState, type ReviewTripInput, type SetupMutationResult, type SetupTransport, type TrackingSetup, type TrackingSnapshot, type Trip, type TripRevision, type Vehicle } from './MaintenanceStore';
 
 declare class MaintenanceStoreModule extends NativeModule<{}> implements NativeMaintenanceStore {
   getBootstrap(): Promise<Bootstrap>;
@@ -24,6 +24,11 @@ declare class MaintenanceStoreModule extends NativeModule<{}> implements NativeM
   getOdometerFacts(vehicleId: string): Promise<OdometerFacts>;
   getTrackingSnapshot(): Promise<TrackingSnapshot>;
   getTrackingSetup(vehicleId: string): Promise<TrackingSetup>;
+  saveTrackingSetup(vehicleId: string, transport: SetupTransport, setupId: string | undefined, shortcutsReady: boolean, automationsReady: boolean, checklistConfirmed: boolean, confirmationToken?: string): Promise<SetupMutationResult>;
+  bindTrackingRoute(vehicleId: string, setupId: string, confirmationToken?: string): Promise<SetupMutationResult>;
+  armTrackingSetupTest(vehicleId: string, setupId: string): Promise<SetupMutationResult>;
+  cancelTrackingSetupTest(vehicleId: string, setupId: string): Promise<SetupMutationResult>;
+  removeTrackingSetup(vehicleId: string, setupId: string): Promise<SetupMutationResult>;
   getLocationPermissionStatus(): Promise<LocationPermissionStatus>;
   requestLocationPermission(): Promise<LocationPermissionStatus>;
   startTracking(vehicleId: string, source: 'manual' | 'automatic'): Promise<TrackingSnapshot>;

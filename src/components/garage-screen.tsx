@@ -9,9 +9,11 @@ import { DetailOverlayHeader, detailHeaderContentInset } from '@/components/deta
 import { PrimaryTabHeader, usePrimaryTabHeaderContentInset } from '@/components/primary-tab-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Card, Chevron, MetaPill, SectionLabel, type Tone } from '@/components/torque-ui';
+import { Chevron, MetaPill, type Tone } from '@/components/torque-ui';
 import { VehicleDashboard } from '@/components/vehicle-dashboard';
 import { ScheduleManager } from '@/features/schedules/schedule-manager';
+import { TrackingSetupScreen } from '@/features/tracking/tracking-setup-screen';
+import { setupStatusTitle } from '@/features/tracking/setup-checklist';
 import { calculateDue } from '@/features/schedules/due-calculator';
 import { Spacing, TorqueColors } from '@/constants/theme';
 import { civilToday, isCivilDate, isMileage, mileageToMilliMiles as toMilliMiles } from '@/utils/local-values';
@@ -53,6 +55,7 @@ export function GarageScreen() {
   const [editingVehicleId, setEditingVehicleId] = useState<string>();
   const [editingScheduleId, setEditingScheduleId] = useState<string>();
   const [odometerVehicleId, setOdometerVehicleId] = useState<string>();
+  const [setupVehicleId, setSetupVehicleId] = useState<string>();
 
   const loadVehicles = useCallback(() => {
     setLoading(true);
@@ -107,6 +110,9 @@ export function GarageScreen() {
     );
   }
 
+  const setupVehicle = vehicles.find((vehicle) => vehicle.id === setupVehicleId);
+  if (setupVehicle) return <TrackingSetupScreen vehicle={setupVehicle} onBack={() => { setSetupVehicleId(undefined); loadVehicles(); }} />;
+
   const editingVehicle = vehicles.find((vehicle) => vehicle.id === ((quickAdd ? undefined : vehicleId) ?? editingVehicleId));
   if (editingVehicle) {
     const closeEditor = () => {
@@ -144,6 +150,7 @@ export function GarageScreen() {
           setEditingVehicleId(viewingVehicle.id);
         }}
         onUpdateOdometer={() => setOdometerVehicleId(viewingVehicle.id)}
+        onSetup={() => setSetupVehicleId(viewingVehicle.id)}
       />
     );
   }
@@ -316,7 +323,7 @@ function VehicleCard({ vehicle, due, onPress }: Readonly<{ vehicle: GarageVehicl
           {automatic ? (
             <View style={styles.trackingBadge}>
               <View style={styles.trackingBadgeDot} />
-              <ThemedText style={styles.trackingBadgeText}>Tracking</ThemedText>
+              <ThemedText style={styles.trackingBadgeText}>Auto trip ready</ThemedText>
             </View>
           ) : null}
         </View>
@@ -335,7 +342,7 @@ function VehicleCard({ vehicle, due, onPress }: Readonly<{ vehicle: GarageVehicl
             <ThemedText style={styles.vehicleMetaSeparator}>·</ThemedText>
             <View style={styles.trackingStatus}>
               <SymbolView name={{ ios: 'bolt.fill', android: 'bolt', web: 'bolt' }} tintColor={automatic ? TorqueColors.success : TorqueColors.secondary} size={12} />
-              <ThemedText style={[styles.vehicleMeta, automatic && styles.trackingOn]}>{automatic ? 'Auto trip on' : 'Manual only'}</ThemedText>
+              <ThemedText style={[styles.vehicleMeta, automatic && styles.trackingOn]}>{automatic ? 'Auto trip ready' : 'Manual only'}</ThemedText>
             </View>
           </View>
         </View>
@@ -390,6 +397,7 @@ function VehicleEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const valid = draft.nickname.trim() && draft.make.trim() && draft.model.trim() && Number.isInteger(Number(draft.year)) && Number(draft.year) >= 1886;
+  const [setupOpen, setSetupOpen] = useState(false);
   const save = async () => {
     if (!valid) return;
     setSaving(true);
@@ -461,11 +469,12 @@ function VehicleEditor({
       },
     );
   };
+  if (setupOpen) return <TrackingSetupScreen vehicle={vehicle} onBack={() => setSetupOpen(false)} />;
   return (
     <ThemedView collapsable={false} style={styles.screen}>
         <ScrollView ref={scrollView} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, styles.detailContent]} keyboardShouldPersistTaps="handled">
           <ThemedText style={styles.formIntro}>Identity fields can be changed here. Odometer readings remain an auditable history and are updated separately.</ThemedText>
-          <TrackingSetupStatus vehicleId={vehicle.id} vehicleName={vehicle.nickname} />
+          <TrackingSetupStatus vehicleId={vehicle.id} vehicleName={vehicle.nickname} onOpen={() => setSetupOpen(true)} />
           <Pressable accessibilityRole="button" accessibilityLabel="Hero photo" accessibilityHint="Opens photo options" onPress={photoOptions} style={styles.photoPanel}>
             {vehicle.heroPhotoUri ? (
               <Image source={{ uri: vehicle.heroPhotoUri }} style={styles.photoPreview} accessibilityLabel={`${vehicle.nickname} hero photo`} />
@@ -510,7 +519,7 @@ function VehicleEditor({
   );
 }
 
-function TrackingSetupStatus({ vehicleId, vehicleName }: Readonly<{ vehicleId: string; vehicleName: string }>) {
+function TrackingSetupStatus({ vehicleId, vehicleName, onOpen }: Readonly<{ vehicleId: string; vehicleName: string; onOpen: () => void }>) {
   const [setup, setSetup] = useState<TrackingSetup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useEffectEvent(() => {
@@ -519,7 +528,7 @@ function TrackingSetupStatus({ vehicleId, vehicleName }: Readonly<{ vehicleId: s
       .getSetup(vehicleId)
       .then(setSetup)
       .catch((reason: unknown) => {
-        setError(reason instanceof Error && reason.message.includes('Rebuild the iOS development client') ? reason.message : 'Automatic tracking setup could not be checked.');
+        setError(reason instanceof Error && reason.message.startsWith('Rebuild') ? reason.message : 'Automatic tracking setup could not be checked.');
       });
   });
   useEffect(() => {
@@ -533,46 +542,17 @@ function TrackingSetupStatus({ vehicleId, vehicleName }: Readonly<{ vehicleId: s
       </ThemedText>
     );
   if (!setup) return <ThemedText style={styles.formIntro}>Checking automatic tracking setup...</ThemedText>;
-  const requirements = [{ ready: setup.locationReady, title: 'Precise Always Location', done: 'Granted', todo: 'Grant precise, always-on location' }];
-  const remaining = requirements.filter((requirement) => !requirement.ready).length;
-  const firstIncomplete = requirements.findIndex((requirement) => !requirement.ready);
   const ready = setup.state === 'ready';
   return (
     <View accessibilityLiveRegion="polite" style={styles.setupSection}>
       <View style={[styles.setupBanner, ready ? styles.setupBannerOk : styles.setupBannerWarn]}>
         <View style={styles.setupBannerHead}>
           <View style={[styles.bannerDot, { backgroundColor: ready ? TorqueColors.successDot : TorqueColors.warningDot }]} />
-          <ThemedText style={[styles.setupBannerTitle, { color: ready ? TorqueColors.success : TorqueColors.warning }]}>{ready ? 'Automatic tracking ready' : `Not ready — ${remaining} item${remaining === 1 ? '' : 's'} left`}</ThemedText>
+          <ThemedText style={[styles.setupBannerTitle, { color: ready ? TorqueColors.success : TorqueColors.warning }]}>{setupStatusTitle(setup)}</ThemedText>
         </View>
         <ThemedText style={styles.setupBannerCopy}>{ready ? 'This vehicle can receive its selected Shortcut. Review every captured trip before it affects the estimate.' : `Tracking stays off for ${vehicleName} until the checklist is complete. Manual trips still work.`}</ThemedText>
       </View>
-      <SectionLabel>Checklist · {vehicleName}</SectionLabel>
-      <Card>
-        {requirements.map((requirement, index) => {
-          const status: 'done' | 'partial' | 'empty' = requirement.ready ? 'done' : index === firstIncomplete ? 'partial' : 'empty';
-          return (
-            <View key={requirement.title} style={[styles.checkRow, index < requirements.length - 1 && styles.checkRowDivider]}>
-              <CheckIndicator status={status} />
-              <View style={styles.checkText}>
-                <ThemedText style={styles.checkTitle}>{requirement.title}</ThemedText>
-                <ThemedText style={styles.checkSubtitle}>{requirement.ready ? requirement.done : requirement.todo}</ThemedText>
-              </View>
-            </View>
-          );
-        })}
-      </Card>
-      <ThemedText style={styles.setupHint}>Create Bluetooth automations in Apple Shortcuts using this app&apos;s Start Trip and End Trip actions. The app uses Precise Always Location to measure movement while a trip is active.</ThemedText>
-    </View>
-  );
-}
-
-function CheckIndicator({ status }: Readonly<{ status: 'done' | 'partial' | 'empty' }>) {
-  const tone = status === 'done' ? TorqueColors.success : status === 'partial' ? TorqueColors.warning : TorqueColors.secondary;
-  const surface = status === 'done' ? TorqueColors.successSurface : status === 'partial' ? TorqueColors.warningSurface : TorqueColors.neutralSurface;
-  const symbol = status === 'done' ? 'checkmark' : status === 'partial' ? 'minus' : 'circle';
-  return (
-    <View style={[styles.checkIndicator, { backgroundColor: surface }]}>
-      <SymbolView name={symbol} tintColor={tone} size={status === 'empty' ? 8 : 13} weight="bold" />
+      <ActionButton label="Automatic tracking setup" onPress={onOpen} />
     </View>
   );
 }
